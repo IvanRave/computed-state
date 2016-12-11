@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Observable computed state; calculated properties",
   "main": "index.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IvanRave/computed-state.git"
+  },
   "scripts": {
     "test": "mocha",
     "build": "browserify window-global.js -o dist/bundle.js -t [ babelify ]",
@@ -10,7 +15,6 @@
     "serve": "http-server -p 8082",
     "lint": "eslint src/**"
   },
-  "license": "Apache-2.0",
   "devDependencies": {
     "babel-plugin-transform-es2015-arrow-functions": "6.x",
     "babel-plugin-transform-es2015-block-scoping": "6.x",

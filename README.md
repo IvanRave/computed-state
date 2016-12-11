@@ -20,21 +20,20 @@ module.exports = {
 
 ```
 // main.js
-var state = new Computer(range);
-var store = new Store(state);
+var state = new ComputedState(range);
 
-store.subscribe(function(changedKeys, state) {
+state.subscribe(function(changedKeys, stateNew) {
       expect(changedKeys).to.deep.equal([
         'start', 'end', 'duration'
       ]);
 
-      expect(state.start).to.equal(15);
-      expect(state.end).to.equal(24);
-      expect(state.duration).to.equal(9);
+      expect(stateNew.start).to.equal(15);
+      expect(stateNew.end).to.equal(24);
+      expect(stateNew.duration).to.equal(9);
       done();
 });
 
-store.update({ start: 15, end: 24 });
+state.update({ start: 15, end: 24 });
 ```
 
 More examples in the 'test' folder.
