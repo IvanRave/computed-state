@@ -1,0 +1,29 @@
+{
+  "name": "computed-state",
+  "version": "0.1.0",
+  "description": "Observable computed state; calculated properties",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha",
+    "build": "browserify window-global.js -o dist/bundle.js -t [ babelify ]",
+    "build-test": "browserify test.js -o test-bundle.js",
+    "serve": "http-server -p 8082",
+    "lint": "eslint src/**"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "babel-plugin-transform-es2015-arrow-functions": "6.x",
+    "babel-plugin-transform-es2015-block-scoping": "6.x",
+    "babel-plugin-transform-es2015-classes": "6.x",
+    "babelify": "7.x",
+    "browserify": "13.x",
+    "chai": "3.x",
+    "eslint": "3.x",
+    "eslint-config-airbnb-base": "10.x",
+    "eslint-plugin-import": "2.x",
+    "mocha": "3.x"
+  },
+  "dependencies": {
+    "extend": "^3.0.0"
+  }
+}
