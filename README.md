@@ -1,6 +1,8 @@
 computed-state
 ===
 
+[![Build Status](https://travis-ci.org/IvanRave/computed-state.svg?branch=master)](https://travis-ci.org/IvanRave/computed-state)
+
 Observable computed state
 
 ```

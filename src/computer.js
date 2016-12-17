@@ -15,20 +15,6 @@ var hasOwnProperty = function(inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
 };
 
-/**
- * https://www.polymer-project.org/2.0/docs/about_20
- * No more dirty checking for objects or arrays. Unlike 1.x, when you make a notifying change to an object or array property, Polymer re-evaluates everything below that property (sub-properties, array items).
- */
-var shouldPropChange = function(value, old) {
-  // skip arrays and objects
-  return (
-    // Strict equality check for primitives
-    (old !== value &&
-     // This ensures old:NaN, value:NaN always returns false
-     (old === old || value === value)) // eslint-disable-line no-self-compare
-  );
-};
-
 /** A class to create calculated objects from specific configuration */
 class Computer {
   constructor(config, initialProps) {
@@ -105,54 +91,116 @@ class Computer {
     }
   }
 
+  _createByType(PropConfigType, value) {
+    // if String, Number, Boolean - just return the value
+    if (value.constructor === PropConfigType) {
+      return value;
+    }
+
+    // if own config type, like 'range', 'phone'
+    //   return a computed instance of own type
+    if (typeof PropConfigType === 'object') {
+      // console.log('object', this.constructor);
+      // console.log('new object, based', value);
+      return new this.constructor(PropConfigType, value);
+    }
+
+    throw new TypeError('required type: ' + PropConfigType);
+  }
+
+  /**
+   * For example, create Instance from array
+   * 'ranges': [{start: 123, end: 234}, {...}, ...]
+   * Must return Array of instances for Arrays
+   * @param {String} propName Like 'ranges', 'name'
+   * @param {Array<Object>|String|Number|*} value Any value for this property
+   * @returns {Object} Instance, based on this value
+   */
   _createInstanceFromValue(propName, value) {
     if (value === null) { return null; }
-
     var settingType = this.__config[propName].type;
     var PropConfigType = Array.isArray(settingType) ?
           settingType[0] : settingType;
 
-    if (value.constructor !== PropConfigType) {
-      if (typeof PropConfigType === 'object') {
-        return new Computer(PropConfigType, value);
-      }
-
-      throw new TypeError('required type: ' + PropConfigType + ' for propName: ' + propName);
+    var that = this;
+    if (Array.isArray(value)) {
+      return value.map(function(itemValue) {
+        return that._createByType(PropConfigType, itemValue);
+      });
     }
 
-    return value;
+    return this._createByType(PropConfigType, value);
   }
 
   _set(key, value) {
+    if (this.__config[key].computed) {
+      throw new Error('only_writable_properties_allowed:' + key);
+    }
     this[key] = value;
     // console.log('set', key, value);
   }
 
   /**
-   * @returns {Boolean} Whether the property updated
+   * Set computed properties through a redefine method
+   *
+   * Alternative: Object.defineProperty(this, key, { value: value });
+   *   does not work in PhantomJS: https://github.com/ariya/phantomjs/issues/11856
    */
-  _updatePropertyIfNeeded(props, propertyName) {
-    var value = props[propertyName];
+  _setDefine(key, value) {
+    if (!this.__config[key].computed) {
+      throw new Error('only_computed_properties_allowed:' + key);
+    }
+    this[key] = value;
+  }
 
+  /**
+   * https://www.polymer-project.org/2.0/docs/about_20
+   * No more dirty checking for objects or arrays. Unlike 1.x, when you make a notifying change to an object or array property, Polymer re-evaluates everything below that property (sub-properties, array items).
+   * @param {String} propertyName Like 'ranges', 'name'
+   * @param {*} value for this property
+   * @returns {Boolean} Should prop change
+   */
+  _shouldPropChange(propertyName, value) {
     if (value === undefined) {
       throw new Error('value_cannot_be_undefined');
     }
 
-    var oldValue = this[propertyName];
-
-    if (oldValue === undefined) {
-      throw new Error('no_such_property_to_set:' + propertyName);
+    var old = this[propertyName];
+    if (old === undefined) {
+      throw new Error('property_must_exist: ' + propertyName);
     }
 
-    // TODO: thow Error if set computed value not from computation
+    // skip arrays and objects
+    return (
+      // Strict equality check for primitives
+      (old !== value &&
+       // This ensures old:NaN, value:NaN always returns false
+       (old === old || value === value)) // eslint-disable-line no-self-compare
+    );
+  }
 
-    if (shouldPropChange(value, oldValue) === true) {
-      var valueInstance = this._createInstanceFromValue(propertyName, value);
-      this._set(propertyName, valueInstance);
-      return true;
+  _updateComputedPropertyIfNeeded(propertyName, value) {
+    if (this._shouldPropChange(propertyName, value) === false) {
+      return false;
     }
 
-    return false;
+    var valueInstance = this._createInstanceFromValue(propertyName, value);
+    this._setDefine(propertyName, valueInstance);
+    return true;
+  }
+
+  /**
+   * @param {String} propertyName Like 'ranges', 'name', etc.
+   * @returns {Boolean} Whether the property updated
+   */
+  _updatePropertyIfNeeded(propertyName, value) {
+    if (this._shouldPropChange(propertyName, value) === false) {
+      return false;
+    }
+
+    var valueInstance = this._createInstanceFromValue(propertyName, value);
+    this._set(propertyName, valueInstance);
+    return true;
   }
 
   _runPropEffects(changedPropName) {
@@ -168,17 +216,27 @@ class Computer {
     return list;
   }
 
+  /**
+   * @param {String} propertyPath 'someObject.someProperty' or 'name'
+   * @param {*} value Any value
+   */
   _updatePath(propertyPath, value) {
     var parts = propertyPath.split('.');
     var propertyName = parts[0];
+    // console.log('_updatePath', propertyPath, propertyName);
     if (!propertyName) {
       throw new Error('property_path_invalid: ' + propertyPath);
     }
 
     if (parts.length === 1) {
-      var objectToUpdate = {};
-      objectToUpdate[propertyName] = value;
-      return this._updateProperties(objectToUpdate);
+      var isChanged = this._updatePropertyIfNeeded(propertyName,
+                                                   value);
+
+      if (isChanged) {
+        return this._runBatchedEffects([propertyName]);
+      }
+
+      return null;
     }
 
     // parts.length > 1
@@ -223,13 +281,9 @@ class Computer {
   }
 
   /**
-   * Update properties and run effects (computed props)
-   * @returns {Object} Scope of computed property names (few items)
+   * Run effects for few properties
    */
-  _updateProperties(props) {
-    var changedPropNames = Object.keys(props)
-          .filter(this._updatePropertyIfNeeded.bind(this, props));
-
+  _runBatchedEffects(changedPropNames) {
     if (changedPropNames.length === 0) {
       return null;
     }
@@ -244,6 +298,23 @@ class Computer {
     });
 
     return scopeOfComputedPropNames;
+  }
+
+  /**
+   * Update properties and run effects (computed props)
+   * @param {Object} props Like { name: 'John', lastname: 'Bin' }
+   * @returns {Object} Scope of computed property names (few items)
+   */
+  _updateProperties(props) {
+    var callback = function(propertyName) {
+      return this._updatePropertyIfNeeded(propertyName,
+                                          props[propertyName]);
+    };
+
+    var changedPropNames = Object.keys(props)
+          .filter(callback.bind(this));
+
+    return this._runBatchedEffects(changedPropNames);
   }
 
   /**

@@ -29,6 +29,7 @@ class Effect {
   }
 
   /**
+   * Run computation and update value
    * @param {String} changedKey Name of changed property
    * @returns {Object} Scope of computed properties
    */
@@ -41,9 +42,19 @@ class Effect {
       return ctx[watchedKey];
     });
 
-    var props = {};
-    props[this.computedKey] = this.computation.apply(null, args);
-    return ctx.update(props);
+    // var props = {};
+    // props[this.computedKey] = this.computation.apply(null, args);
+    // return ctx._updateProperties(props);
+
+    var computationResult = this.computation.apply(null, args);
+
+    var isChanged = ctx._updateComputedPropertyIfNeeded(this.computedKey, computationResult);
+
+    if (isChanged) {
+      return ctx._runBatchedEffects([this.computedKey]);
+    }
+
+    return null;
   }
 }
 

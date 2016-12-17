@@ -11,7 +11,7 @@ class Listener {
    * Filter and notify listeners
    * If no changedKeys or no watchedKeys - send it
    */
-  notify(changedKeys, state) {
+  notify(changedKeys, state, writableState) {
     var isSend = false;
     if (this.watchedKeys && changedKeys) {
       isSend = this.watchedKeys.some(function(watchedKey) {
@@ -22,7 +22,7 @@ class Listener {
     }
 
     if (isSend) {
-      this.callback(changedKeys, state);
+      this.callback(changedKeys, state, writableState);
     }
   }
 }

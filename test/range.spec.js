@@ -24,4 +24,12 @@ describe('store', function() {
 
     state.update({ start: 15, end: 24 });
   });
+
+  it('should return only writable properties', function() {
+    var result = state.getWritableState();
+    expect(result).to.deep.equal({
+      start: null,
+      end: null
+    });
+  });
 });

@@ -3,20 +3,46 @@
 var Listener = require('./listener');
 var Computer = require('./computer');
 
-var toPlainChangedKeys = function(scope, total) {
+var toPlainChangedKeys = function(scope, target) {
   if (!scope) { throw new Error('toPlainChangedKeys_scope_required'); }
 
   if (Array.isArray(scope) === true) {
     scope.forEach(function(item) {
-      toPlainChangedKeys(item, total);
+      toPlainChangedKeys(item, target);
     });
   } else {
     // if Object
     Object.keys(scope).forEach(function(key) {
-      if (total.indexOf(key) < 0) { total.push(key); }
-      toPlainChangedKeys(scope[key], total);
+      if (target.indexOf(key) < 0) { target.push(key); }
+      toPlainChangedKeys(scope[key], target);
     });
   }
+};
+
+// get with cloning
+var getWritableProperties = function(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(function(item) {
+      return getWritableProperties(item);
+    });
+  }
+
+  var result = {};
+
+  Object.keys(obj).forEach(function(key) {
+    if (!obj.__config[key].computed) {
+      var value = obj[key];
+      if (value !== null && typeof value === 'object') {
+        // objects
+        result[key] = getWritableProperties(value);
+      } else {
+        // primitives
+        result[key] = obj[key];
+      }
+    }
+  });
+
+  return result;
 };
 
 class ComputedState {
@@ -28,7 +54,7 @@ class ComputedState {
     if (!scopeOfChangedKeys || scopeOfChangedKeys.length === 0) {
       return;
     }
-
+    // console.log('scopeOfChangedKeys', JSON.stringify(scopeOfChangedKeys));
     var allChangedKeys = [];
     toPlainChangedKeys(scopeOfChangedKeys, allChangedKeys);
     this.ready(allChangedKeys);
@@ -39,11 +65,20 @@ class ComputedState {
     return JSON.parse(JSON.stringify(this.state));
   }
 
+  /**
+   * @returns {Object} Scope of writable properties (without computed)
+   *  e.g: to backup it
+   */
+  getWritableState() {
+    return getWritableProperties(this.state);
+  }
+
   ready(changedKeys) {
     var state = this.getState();
+    var writableState = this.getWritableState();
 
     this.listeners.forEach(function(listener) {
-      listener.notify(changedKeys, state);
+      listener.notify(changedKeys, state, writableState);
     });
   }
 
