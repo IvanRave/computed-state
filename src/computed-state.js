@@ -1,9 +1,11 @@
 /** @module */
 
-var Listener = require('./listener');
-var Computer = require('./computer');
+'use strict';
 
-var toPlainChangedKeys = function(scope, target) {
+const Listener = require('./listener');
+const Computer = require('./computer');
+
+const toPlainChangedKeys = function(scope, target) {
   if (!scope) { throw new Error('toPlainChangedKeys_scope_required'); }
 
   if (Array.isArray(scope) === true) {
@@ -20,18 +22,18 @@ var toPlainChangedKeys = function(scope, target) {
 };
 
 // get with cloning
-var getWritableProperties = function(obj) {
+const getWritableProperties = function(obj) {
   if (Array.isArray(obj)) {
     return obj.map(function(item) {
       return getWritableProperties(item);
     });
   }
 
-  var result = {};
+  const result = {};
 
   Object.keys(obj).forEach(function(key) {
     if (!obj.__config[key].computed) {
-      var value = obj[key];
+      const value = obj[key];
       if (value !== null && typeof value === 'object') {
         // objects
         result[key] = getWritableProperties(value);
@@ -55,7 +57,7 @@ class ComputedState {
       return;
     }
     // console.log('scopeOfChangedKeys', JSON.stringify(scopeOfChangedKeys));
-    var allChangedKeys = [];
+    const allChangedKeys = [];
     toPlainChangedKeys(scopeOfChangedKeys, allChangedKeys);
     this.ready(allChangedKeys);
   }
@@ -74,8 +76,8 @@ class ComputedState {
   }
 
   ready(changedKeys) {
-    var state = this.getState();
-    var writableState = this.getWritableState();
+    const state = this.getState();
+    const writableState = this.getWritableState();
 
     this.listeners.forEach(function(listener) {
       listener.notify(changedKeys, state, writableState);

@@ -1,5 +1,7 @@
 /** @module */
 
+'use strict';
+
 /** An effect for some computed property */
 class Effect {
   constructor(ctx, computedKey, watchedKeys, computation) {
@@ -36,9 +38,9 @@ class Effect {
   compute(changedKey) {
     if (this.watchedKeys.indexOf(changedKey) < 0) { return null; }
 
-    var ctx = this.ctx;
+    const ctx = this.ctx;
 
-    var args = this.watchedKeys.map(function(watchedKey) {
+    const args = this.watchedKeys.map(function(watchedKey) {
       return ctx[watchedKey];
     });
 
@@ -46,9 +48,9 @@ class Effect {
     // props[this.computedKey] = this.computation.apply(null, args);
     // return ctx._updateProperties(props);
 
-    var computationResult = this.computation.apply(null, args);
+    const computationResult = this.computation.apply(null, args);
 
-    var isChanged = ctx._updateComputedPropertyIfNeeded(this.computedKey, computationResult);
+    const isChanged = ctx._updateComputedPropertyIfNeeded(this.computedKey, computationResult);
 
     if (isChanged) {
       return ctx._runBatchedEffects([this.computedKey]);

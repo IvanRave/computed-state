@@ -1,31 +1,59 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+/** @module */
+
+'use strict';
+
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-/** @module */
-
 var Listener = require('./listener');
 var Computer = require('./computer');
 
-var toPlainChangedKeys = function (scope, total) {
+var toPlainChangedKeys = function (scope, target) {
   if (!scope) {
     throw new Error('toPlainChangedKeys_scope_required');
   }
 
   if (Array.isArray(scope) === true) {
     scope.forEach(function (item) {
-      toPlainChangedKeys(item, total);
+      toPlainChangedKeys(item, target);
     });
   } else {
     // if Object
     Object.keys(scope).forEach(function (key) {
-      if (total.indexOf(key) < 0) {
-        total.push(key);
+      if (target.indexOf(key) < 0) {
+        target.push(key);
       }
-      toPlainChangedKeys(scope[key], total);
+      toPlainChangedKeys(scope[key], target);
     });
   }
+};
+
+// get with cloning
+var getWritableProperties = function (obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(function (item) {
+      return getWritableProperties(item);
+    });
+  }
+
+  var result = {};
+
+  Object.keys(obj).forEach(function (key) {
+    if (!obj.__config[key].computed) {
+      var value = obj[key];
+      if (value !== null && typeof value === 'object') {
+        // objects
+        result[key] = getWritableProperties(value);
+      } else {
+        // primitives
+        result[key] = obj[key];
+      }
+    }
+  });
+
+  return result;
 };
 
 var ComputedState = function () {
@@ -42,7 +70,7 @@ var ComputedState = function () {
       if (!scopeOfChangedKeys || scopeOfChangedKeys.length === 0) {
         return;
       }
-
+      // console.log('scopeOfChangedKeys', JSON.stringify(scopeOfChangedKeys));
       var allChangedKeys = [];
       toPlainChangedKeys(scopeOfChangedKeys, allChangedKeys);
       this.ready(allChangedKeys);
@@ -55,13 +83,25 @@ var ComputedState = function () {
     value: function getState() {
       return JSON.parse(JSON.stringify(this.state));
     }
+
+    /**
+     * @returns {Object} Scope of writable properties (without computed)
+     *  e.g: to backup it
+     */
+
+  }, {
+    key: 'getWritableState',
+    value: function getWritableState() {
+      return getWritableProperties(this.state);
+    }
   }, {
     key: 'ready',
     value: function ready(changedKeys) {
       var state = this.getState();
+      var writableState = this.getWritableState();
 
       this.listeners.forEach(function (listener) {
-        listener.notify(changedKeys, state);
+        listener.notify(changedKeys, state, writableState);
       });
     }
   }, {
@@ -97,17 +137,21 @@ var ComputedState = function () {
 module.exports = ComputedState;
 
 },{"./computer":2,"./listener":4}],2:[function(require,module,exports){
+/** @module */
+
+'use strict';
+
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-/** @module */
-
 var Effect = require('./effect');
 
-var findIndexById = function (list, id) {
+var PRIMARY_KEY = 'id';
+
+var findIndexByPrimaryKey = function (list, primaryKey) {
   for (var i = 0, l = list.length; i < l; i += 1) {
-    if (list[i].id === id) {
+    if (list[i][PRIMARY_KEY] === primaryKey) {
       return i;
     }
   }
@@ -116,20 +160,6 @@ var findIndexById = function (list, id) {
 
 var hasOwnProperty = function (inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
-};
-
-/**
- * https://www.polymer-project.org/2.0/docs/about_20
- * No more dirty checking for objects or arrays. Unlike 1.x, when you make a notifying change to an object or array property, Polymer re-evaluates everything below that property (sub-properties, array items).
- */
-var shouldPropChange = function (value, old) {
-  // skip arrays and objects
-  return (
-    // Strict equality check for primitives
-    old !== value && (
-    // This ensures old:NaN, value:NaN always returns false
-    old === old || value === value)
-  );
 };
 
 /** A class to create calculated objects from specific configuration */
@@ -216,60 +246,132 @@ var Computer = function () {
       }
     }
   }, {
+    key: '_createByType',
+    value: function _createByType(PropConfigType, value) {
+      // if String, Number, Boolean - just return the value
+      if (value.constructor === PropConfigType) {
+        return value;
+      }
+
+      // if own config type, like 'range', 'phone'
+      //   return a computed instance of own type
+      if (typeof PropConfigType === 'object') {
+        // console.log('object', this.constructor);
+        // console.log('new object, based', value);
+        return new this.constructor(PropConfigType, value);
+      }
+
+      throw new TypeError('required type: ' + PropConfigType);
+    }
+
+    /**
+     * For example, create Instance from array
+     * 'ranges': [{start: 123, end: 234}, {...}, ...]
+     * Must return Array of instances for Arrays
+     * @param {String} propName Like 'ranges', 'name'
+     * @param {Array<Object>|String|Number|*} value Any value for this property
+     * @returns {Object} Instance, based on this value
+     */
+
+  }, {
     key: '_createInstanceFromValue',
     value: function _createInstanceFromValue(propName, value) {
       if (value === null) {
         return null;
       }
-
       var settingType = this.__config[propName].type;
       var PropConfigType = Array.isArray(settingType) ? settingType[0] : settingType;
 
-      if (value.constructor !== PropConfigType) {
-        if (typeof PropConfigType === 'object') {
-          return new Computer(PropConfigType, value);
-        }
-
-        throw new TypeError('required type: ' + PropConfigType + ' for propName: ' + propName);
+      var that = this;
+      if (Array.isArray(value)) {
+        return value.map(function (itemValue) {
+          return that._createByType(PropConfigType, itemValue);
+        });
       }
 
-      return value;
+      return this._createByType(PropConfigType, value);
     }
   }, {
     key: '_set',
     value: function _set(key, value) {
+      if (this.__config[key].computed) {
+        throw new Error('only_writable_properties_allowed:' + key);
+      }
       this[key] = value;
       // console.log('set', key, value);
     }
 
     /**
+     * Set computed properties through a redefine method
+     *
+     * Alternative: Object.defineProperty(this, key, { value: value });
+     *   does not work in PhantomJS: https://github.com/ariya/phantomjs/issues/11856
+     */
+
+  }, {
+    key: '_setComputed',
+    value: function _setComputed(key, value) {
+      if (!this.__config[key].computed) {
+        throw new Error('only_computed_properties_allowed:' + key);
+      }
+      this[key] = value;
+    }
+
+    /**
+     * https://www.polymer-project.org/2.0/docs/about_20
+     * No more dirty checking for objects or arrays. Unlike 1.x, when you make a notifying change to an object or array property, Polymer re-evaluates everything below that property (sub-properties, array items).
+     * @param {String} propertyName Like 'ranges', 'name'
+     * @param {*} value for this property
+     * @returns {Boolean} Should prop change
+     */
+
+  }, {
+    key: '_shouldPropChange',
+    value: function _shouldPropChange(propertyName, value) {
+      if (value === undefined) {
+        throw new Error('value_cannot_be_undefined');
+      }
+
+      var old = this[propertyName];
+      if (old === undefined) {
+        throw new Error('property_must_exist: ' + propertyName);
+      }
+
+      // skip arrays and objects
+      return (
+        // Strict equality check for primitives
+        old !== value && (
+        // This ensures old:NaN, value:NaN always returns false
+        old === old || value === value)
+      );
+    }
+  }, {
+    key: '_updateComputedPropertyIfNeeded',
+    value: function _updateComputedPropertyIfNeeded(propertyName, value) {
+      if (this._shouldPropChange(propertyName, value) === false) {
+        return false;
+      }
+
+      var valueInstance = this._createInstanceFromValue(propertyName, value);
+      this._setComputed(propertyName, valueInstance);
+      return true;
+    }
+
+    /**
+     * @param {String} propertyName Like 'ranges', 'name', etc.
      * @returns {Boolean} Whether the property updated
      */
 
   }, {
     key: '_updatePropertyIfNeeded',
-    value: function _updatePropertyIfNeeded(props, propertyName) {
-      var value = props[propertyName];
-
-      if (value === undefined) {
-        throw new Error('value_cannot_be_undefined');
+    value: function _updatePropertyIfNeeded(propertyName, value) {
+      if (this._shouldPropChange(propertyName, value) === false) {
+        return false;
       }
 
-      var oldValue = this[propertyName];
-
-      if (oldValue === undefined) {
-        throw new Error('no_such_property_to_set:' + propertyName);
-      }
-
-      // TODO: thow Error if set computed value not from computation
-
-      if (shouldPropChange(value, oldValue) === true) {
-        var valueInstance = this._createInstanceFromValue(propertyName, value);
-        this._set(propertyName, valueInstance);
-        return true;
-      }
-
-      return false;
+      var valueInstance = this._createInstanceFromValue(propertyName, value);
+      this._set(propertyName, valueInstance);
+      return true;
     }
   }, {
     key: '_runPropEffects',
@@ -285,39 +387,118 @@ var Computer = function () {
       // console.log('computedPropNames', computedPropNames);
       return list;
     }
+
+    // if an object (not a property)
+    // ['student', 'name'] = this.student
+    // ['people', '0', 'name'] = this.people
+    // .join('.')
+
   }, {
-    key: '_updatePath',
-    value: function _updatePath(propertyPath, value) {
-      var parts = propertyPath.split('.');
-      var propertyName = parts[0];
-      if (!propertyName) {
-        throw new Error('property_path_invalid: ' + propertyPath);
+    key: '_updatePathObject',
+    value: function _updatePathObject(objectName, nextParts, value) {
+      var mainObject = this[objectName];
+
+      // if no people.0
+      if (!mainObject) {
+        throw new Error('no_such_property_to_set: ' + objectName);
       }
 
-      if (parts.length === 1) {
-        var objectToUpdate = {};
-        objectToUpdate[propertyName] = value;
-        return this._updateProperties(objectToUpdate);
+      // this.student._updatePath
+      // this.people - Array (no such method)
+      var scopeOfInternalChanges;
+
+      // this.people - Array (no inner methods)
+      // nextPropertyPath = '0.name'
+      if (Array.isArray(mainObject)) {
+        // 2 = of [2, name] of people.2.name
+        // 4 = of [4] of people.4
+        // usa = of [usa, area] of countries.usa.area
+        var elemPrimaryKey = nextParts[0];
+        // search by index of an array
+        // it can be replaced with search by id of item
+        var mainItem = mainObject.filter(function (elem) {
+          // country['id'] === 'usa'
+          return elem[PRIMARY_KEY] + '' === elemPrimaryKey;
+        })[0];
+
+        // Looking by array index
+        // var mainItem = mainObject[itemPart];
+        if (!mainItem) {
+          // console.log('mainItem', elemPrimaryKey, JSON.stringify(mainObject));
+          throw new Error('cannot_update_nonexistent_item: ' + objectName + '.' + elemPrimaryKey);
+        }
+        // 'name' of [2,name] of people.2.name
+        // '' of [4] of people.4
+        var itemNextPropertyPath = nextParts.slice(1).join('.');
+        if (!itemNextPropertyPath) {
+          throw new Error('update_is_not_supported_for_path: ' + objectName + '.' + elemPrimaryKey + ' use removeItem + insertItem instead');
+        }
+        scopeOfInternalChanges = mainItem._updatePath(itemNextPropertyPath, value);
+      } else {
+        scopeOfInternalChanges = mainObject._updatePath(nextParts.join('.'), value);
       }
-
-      // parts.length > 1
-      if (this[propertyName] === null) {
-        throw new Error('no_such_property_to_set:' + propertyName);
-      }
-
-      var nextPropertyPath = parts.slice(1).join('.');
-
-      var scopeOfInternalChanges = this[propertyName]._updatePath(nextPropertyPath, value);
 
       if (!scopeOfInternalChanges) {
         return null;
       }
 
       var scopeOfComputedPropNames = {};
-      var computedPropNames = this._runPropEffects(propertyName);
-      scopeOfComputedPropNames[propertyName] = computedPropNames;
-
+      scopeOfComputedPropNames[objectName] = this._runPropEffects(objectName);
       return scopeOfComputedPropNames;
+    }
+
+    /**
+     * @param {String} propertyPath Scope of property names, like
+     *   - 'someObject.someProperty'
+     *   - 'name'
+     *   - 'students[0].name' - index of element
+     *   - 'people:3.name' - id of element
+     *   - 'people:3'
+     *   - 'countries:usa.area'
+     * @param {*} value Any value
+     */
+
+  }, {
+    key: '_updatePath',
+    value: function _updatePath(propertyPath, value) {
+      // levels of an object
+      // 'student.name'
+      // - student - 1st level
+      // - name - 2nd level
+      // or
+      // 'countries.usa.area'
+      // - countries
+      // - usa - 2nd level
+      // - area - 3rd level
+      var levels = propertyPath.split('.');
+
+      // main = 'student': ['student', 'name'] (object)
+      // main = 'lastName': ['lastName'] (property of an object)
+      // main = 'people' : ['people', '0', 'name'] (object = array)
+      // main = '0' : ['0', 'name'] (object = item of an array)
+      var mainLevel = levels[0];
+      // console.log('_updatePath', propertyPath, propertyName);
+      if (!mainLevel) {
+        throw new Error('property_path_invalid: ' + propertyPath);
+      }
+
+      // if a property (not an object): name, lastName, age
+      // or update a full object:
+      // - 'student': { id:123, name: 'asdf'}
+      // - 'countries.usa': { area: 345 }
+      if (levels.length === 1) {
+        var isChanged = this._updatePropertyIfNeeded(mainLevel, value);
+
+        if (isChanged) {
+          return this._runBatchedEffects([mainLevel]);
+        }
+
+        return null;
+      }
+
+      var nextLevels = levels.slice(1);
+      // object
+      return this._updatePathObject(mainLevel, nextLevels, value);
     }
   }, {
     key: 'update',
@@ -343,15 +524,12 @@ var Computer = function () {
     }
 
     /**
-     * Update properties and run effects (computed props)
-     * @returns {Object} Scope of computed property names (few items)
+     * Run effects for few properties
      */
 
   }, {
-    key: '_updateProperties',
-    value: function _updateProperties(props) {
-      var changedPropNames = Object.keys(props).filter(this._updatePropertyIfNeeded.bind(this, props));
-
+    key: '_runBatchedEffects',
+    value: function _runBatchedEffects(changedPropNames) {
       if (changedPropNames.length === 0) {
         return null;
       }
@@ -369,6 +547,24 @@ var Computer = function () {
     }
 
     /**
+     * Update properties and run effects (computed props)
+     * @param {Object} props Like { name: 'John', lastname: 'Bin' }
+     * @returns {Object} Scope of computed property names (few items)
+     */
+
+  }, {
+    key: '_updateProperties',
+    value: function _updateProperties(props) {
+      var callback = function (propertyName) {
+        return this._updatePropertyIfNeeded(propertyName, props[propertyName]);
+      };
+
+      var changedPropNames = Object.keys(props).filter(callback.bind(this));
+
+      return this._runBatchedEffects(changedPropNames);
+    }
+
+    /**
      * Insert to an array
      * - insertItem('tasks',  {id: 2, name: 'asdf'})
      */
@@ -376,8 +572,11 @@ var Computer = function () {
   }, {
     key: 'insertItem',
     value: function insertItem(propName, item) {
-      if (item.id === null || item.id === undefined) {
-        throw new Error('required_id_for_prop: ' + propName);
+      // TODO: use PrimaryKey config instead 'id'
+      // TODO: verify id unique through all table
+      // TODO: insert, using sorting by id
+      if (item[PRIMARY_KEY] === null || item[PRIMARY_KEY] === undefined) {
+        throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propName);
       }
 
       var typeArray = this.__config[propName].type;
@@ -391,7 +590,7 @@ var Computer = function () {
         throw new Error('insert_only_to_arrays:' + propName);
       }
 
-      var existingIndex = findIndexById(currentList, item.id);
+      var existingIndex = findIndexByPrimaryKey(currentList, item[PRIMARY_KEY]);
 
       if (existingIndex >= 0) {
         return null;
@@ -407,7 +606,7 @@ var Computer = function () {
     }
   }, {
     key: 'removeItem',
-    value: function removeItem(propName, id) {
+    value: function removeItem(propName, primaryKey) {
       var typeArray = this.__config[propName].type;
       if (Array.isArray(typeArray) === false) {
         throw new Error('remove_only_for_arrays');
@@ -419,7 +618,7 @@ var Computer = function () {
         throw new Error('remove_only_from_arrays:' + propName);
       }
 
-      var existingIndex = findIndexById(currentList, id);
+      var existingIndex = findIndexByPrimaryKey(currentList, primaryKey);
 
       if (existingIndex < 0) {
         return null;
@@ -439,13 +638,16 @@ var Computer = function () {
 module.exports = Computer;
 
 },{"./effect":3}],3:[function(require,module,exports){
+/** @module */
+
+'use strict';
+
+/** An effect for some computed property */
+
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-/** @module */
-
-/** An effect for some computed property */
 var Effect = function () {
   function Effect(ctx, computedKey, watchedKeys, computation) {
     _classCallCheck(this, Effect);
@@ -476,13 +678,14 @@ var Effect = function () {
   }
 
   /**
+   * Run computation and update value
    * @param {String} changedKey Name of changed property
    * @returns {Object} Scope of computed properties
    */
 
 
   _createClass(Effect, [{
-    key: "compute",
+    key: 'compute',
     value: function compute(changedKey) {
       if (this.watchedKeys.indexOf(changedKey) < 0) {
         return null;
@@ -494,9 +697,19 @@ var Effect = function () {
         return ctx[watchedKey];
       });
 
-      var props = {};
-      props[this.computedKey] = this.computation.apply(null, args);
-      return ctx.update(props);
+      // var props = {};
+      // props[this.computedKey] = this.computation.apply(null, args);
+      // return ctx._updateProperties(props);
+
+      var computationResult = this.computation.apply(null, args);
+
+      var isChanged = ctx._updateComputedPropertyIfNeeded(this.computedKey, computationResult);
+
+      if (isChanged) {
+        return ctx._runBatchedEffects([this.computedKey]);
+      }
+
+      return null;
     }
   }]);
 
@@ -506,13 +719,16 @@ var Effect = function () {
 module.exports = Effect;
 
 },{}],4:[function(require,module,exports){
+/** @module */
+
+'use strict';
+
+/** A listener of store changes */
+
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
-/** @module */
-
-/** A listener of store changes */
 var Listener = function () {
   function Listener(callback, watchedKeys) {
     _classCallCheck(this, Listener);
@@ -528,8 +744,8 @@ var Listener = function () {
 
 
   _createClass(Listener, [{
-    key: "notify",
-    value: function notify(changedKeys, state) {
+    key: 'notify',
+    value: function notify(changedKeys, state, writableState) {
       var isSend = false;
       if (this.watchedKeys && changedKeys) {
         isSend = this.watchedKeys.some(function (watchedKey) {
@@ -540,7 +756,7 @@ var Listener = function () {
       }
 
       if (isSend) {
-        this.callback(changedKeys, state);
+        this.callback(changedKeys, state, writableState);
       }
     }
   }]);

@@ -1,17 +1,21 @@
 /** @module */
 
-var Effect = require('./effect');
+'use strict';
 
-var findIndexById = function(list, id) {
-  for (var i = 0, l = list.length; i < l; i += 1) {
-    if (list[i].id === id) {
+const Effect = require('./effect');
+
+const PRIMARY_KEY = 'id';
+
+const findIndexByPrimaryKey = function(list, primaryKey) {
+  for (let i = 0, l = list.length; i < l; i += 1) {
+    if (list[i][PRIMARY_KEY] === primaryKey) {
       return i;
     }
   }
   return -1;
 };
 
-var hasOwnProperty = function(inst, propName) {
+const hasOwnProperty = function(inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
 };
 
@@ -45,9 +49,9 @@ class Computer {
    * - for arrays: [] (can not be null)
    */
   _createProperty(props, propName) {
-    var propSettings = props[propName];
+    const propSettings = props[propName];
 
-    var settingType = propSettings.type;
+    const settingType = propSettings.type;
     if (!settingType) {
       throw new Error('required_type: ' + propName + ': ' + propSettings.type);
     }
@@ -65,8 +69,8 @@ class Computer {
   }
 
   _attachComputedProps(propName, settingComputed) {
-    var watchedKeys = settingComputed.slice(0, -1);
-    var calculation = settingComputed.slice(-1)[0];
+    const watchedKeys = settingComputed.slice(0, -1);
+    const calculation = settingComputed.slice(-1)[0];
 
     if (!calculation || typeof calculation !== 'function') {
       throw new Error('required_calculation_function: ' + propName);
@@ -118,11 +122,11 @@ class Computer {
    */
   _createInstanceFromValue(propName, value) {
     if (value === null) { return null; }
-    var settingType = this.__config[propName].type;
-    var PropConfigType = Array.isArray(settingType) ?
+    const settingType = this.__config[propName].type;
+    const PropConfigType = Array.isArray(settingType) ?
           settingType[0] : settingType;
 
-    var that = this;
+    const that = this;
     if (Array.isArray(value)) {
       return value.map(function(itemValue) {
         return that._createByType(PropConfigType, itemValue);
@@ -146,7 +150,7 @@ class Computer {
    * Alternative: Object.defineProperty(this, key, { value: value });
    *   does not work in PhantomJS: https://github.com/ariya/phantomjs/issues/11856
    */
-  _setDefine(key, value) {
+  _setComputed(key, value) {
     if (!this.__config[key].computed) {
       throw new Error('only_computed_properties_allowed:' + key);
     }
@@ -165,7 +169,7 @@ class Computer {
       throw new Error('value_cannot_be_undefined');
     }
 
-    var old = this[propertyName];
+    const old = this[propertyName];
     if (old === undefined) {
       throw new Error('property_must_exist: ' + propertyName);
     }
@@ -184,8 +188,8 @@ class Computer {
       return false;
     }
 
-    var valueInstance = this._createInstanceFromValue(propertyName, value);
-    this._setDefine(propertyName, valueInstance);
+    const valueInstance = this._createInstanceFromValue(propertyName, value);
+    this._setComputed(propertyName, valueInstance);
     return true;
   }
 
@@ -198,15 +202,15 @@ class Computer {
       return false;
     }
 
-    var valueInstance = this._createInstanceFromValue(propertyName, value);
+    const valueInstance = this._createInstanceFromValue(propertyName, value);
     this._set(propertyName, valueInstance);
     return true;
   }
 
   _runPropEffects(changedPropName) {
-    var list = [];
+    const list = [];
     this.__effects.forEach(function(eff) {
-      var scopeOfComputedPropNames = eff.compute(changedPropName);
+      const scopeOfComputedPropNames = eff.compute(changedPropName);
       if (scopeOfComputedPropNames) {
         list.push(scopeOfComputedPropNames);
       }
@@ -216,47 +220,111 @@ class Computer {
     return list;
   }
 
-  /**
-   * @param {String} propertyPath 'someObject.someProperty' or 'name'
-   * @param {*} value Any value
-   */
-  _updatePath(propertyPath, value) {
-    var parts = propertyPath.split('.');
-    var propertyName = parts[0];
-    // console.log('_updatePath', propertyPath, propertyName);
-    if (!propertyName) {
-      throw new Error('property_path_invalid: ' + propertyPath);
+  // if an object (not a property)
+  // ['student', 'name'] = this.student
+  // ['people', '0', 'name'] = this.people
+    // .join('.')
+  _updatePathObject(objectName, nextParts, value) {
+    const mainObject = this[objectName];
+
+    // if no people.0
+    if (!mainObject) {
+      throw new Error('no_such_property_to_set: ' + objectName);
     }
 
-    if (parts.length === 1) {
-      var isChanged = this._updatePropertyIfNeeded(propertyName,
-                                                   value);
+    // this.student._updatePath
+    // this.people - Array (no such method)
+    var scopeOfInternalChanges;
 
-      if (isChanged) {
-        return this._runBatchedEffects([propertyName]);
+    // this.people - Array (no inner methods)
+    // nextPropertyPath = '0.name'
+    if (Array.isArray(mainObject)) {
+      // 2 = of [2, name] of people.2.name
+      // 4 = of [4] of people.4
+      // usa = of [usa, area] of countries.usa.area
+      var elemPrimaryKey = nextParts[0];
+      // search by index of an array
+      // it can be replaced with search by id of item
+      var mainItem = mainObject.filter(function(elem) {
+        // country['id'] === 'usa'
+        return (elem[PRIMARY_KEY] + '') === elemPrimaryKey;
+      })[0];
+
+      // Looking by array index
+      // var mainItem = mainObject[itemPart];
+      if (!mainItem) {
+        // console.log('mainItem', elemPrimaryKey, JSON.stringify(mainObject));
+        throw new Error('cannot_update_nonexistent_item: ' + objectName + '.' + elemPrimaryKey);
       }
-
-      return null;
+      // 'name' of [2,name] of people.2.name
+      // '' of [4] of people.4
+      var itemNextPropertyPath = nextParts.slice(1).join('.');
+      if (!itemNextPropertyPath) {
+        throw new Error('update_is_not_supported_for_path: ' + objectName + '.' + elemPrimaryKey + ' use removeItem + insertItem instead');
+      }
+      scopeOfInternalChanges = mainItem._updatePath(itemNextPropertyPath, value);
+    } else {
+      scopeOfInternalChanges = mainObject._updatePath(nextParts.join('.'), value);
     }
-
-    // parts.length > 1
-    if (this[propertyName] === null) {
-      throw new Error('no_such_property_to_set:' + propertyName);
-    }
-
-    var nextPropertyPath = parts.slice(1).join('.');
-
-    var scopeOfInternalChanges = this[propertyName]._updatePath(nextPropertyPath, value);
 
     if (!scopeOfInternalChanges) {
       return null;
     }
 
     var scopeOfComputedPropNames = {};
-    var computedPropNames = this._runPropEffects(propertyName);
-    scopeOfComputedPropNames[propertyName] = computedPropNames;
-
+    scopeOfComputedPropNames[objectName] = this._runPropEffects(objectName);
     return scopeOfComputedPropNames;
+  }
+
+  /**
+   * @param {String} propertyPath Scope of property names, like
+   *   - 'someObject.someProperty'
+   *   - 'name'
+   *   - 'students[0].name' - index of element
+   *   - 'people:3.name' - id of element
+   *   - 'people:3'
+   *   - 'countries:usa.area'
+   * @param {*} value Any value
+   */
+  _updatePath(propertyPath, value) {
+    // levels of an object
+    // 'student.name'
+    // - student - 1st level
+    // - name - 2nd level
+    // or
+    // 'countries.usa.area'
+    // - countries
+    // - usa - 2nd level
+    // - area - 3rd level
+    var levels = propertyPath.split('.');
+
+    // main = 'student': ['student', 'name'] (object)
+    // main = 'lastName': ['lastName'] (property of an object)
+    // main = 'people' : ['people', '0', 'name'] (object = array)
+    // main = '0' : ['0', 'name'] (object = item of an array)
+    var mainLevel = levels[0];
+    // console.log('_updatePath', propertyPath, propertyName);
+    if (!mainLevel) {
+      throw new Error('property_path_invalid: ' + propertyPath);
+    }
+
+    // if a property (not an object): name, lastName, age
+    // or update a full object:
+    // - 'student': { id:123, name: 'asdf'}
+    // - 'countries.usa': { area: 345 }
+    if (levels.length === 1) {
+      var isChanged = this._updatePropertyIfNeeded(mainLevel, value);
+
+      if (isChanged) {
+        return this._runBatchedEffects([mainLevel]);
+      }
+
+      return null;
+    }
+
+    var nextLevels = levels.slice(1);
+    // object
+    return this._updatePathObject(mainLevel, nextLevels, value);
   }
 
   update(paths) {
@@ -291,7 +359,7 @@ class Computer {
     var that = this;
 
     var scopeOfComputedPropNames = {};
-    //console.log('changedPropNames', changedPropNames, this);
+    // console.log('changedPropNames', changedPropNames, this);
     changedPropNames.forEach(function(changedPropName) {
       var computedPropNames = that._runPropEffects(changedPropName);
       scopeOfComputedPropNames[changedPropName] = computedPropNames;
@@ -322,8 +390,11 @@ class Computer {
    * - insertItem('tasks',  {id: 2, name: 'asdf'})
    */
   insertItem(propName, item) {
-    if (item.id === null || item.id === undefined) {
-      throw new Error('required_id_for_prop: ' + propName);
+    // TODO: use PrimaryKey config instead 'id'
+    // TODO: verify id unique through all table
+    // TODO: insert, using sorting by id
+    if (item[PRIMARY_KEY] === null || item[PRIMARY_KEY] === undefined) {
+      throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propName);
     }
 
     var typeArray = this.__config[propName].type;
@@ -337,7 +408,7 @@ class Computer {
       throw new Error('insert_only_to_arrays:' + propName);
     }
 
-    var existingIndex = findIndexById(currentList, item.id);
+    var existingIndex = findIndexByPrimaryKey(currentList, item[PRIMARY_KEY]);
 
     if (existingIndex >= 0) { return null; }
 
@@ -350,7 +421,7 @@ class Computer {
     return scopeOfPropNames;
   }
 
-  removeItem(propName, id) {
+  removeItem(propName, primaryKey) {
     var typeArray = this.__config[propName].type;
     if (Array.isArray(typeArray) === false) {
       throw new Error('remove_only_for_arrays');
@@ -362,7 +433,7 @@ class Computer {
       throw new Error('remove_only_from_arrays:' + propName);
     }
 
-    var existingIndex = findIndexById(currentList, id);
+    var existingIndex = findIndexByPrimaryKey(currentList, primaryKey);
 
     if (existingIndex < 0) { return null; }
 

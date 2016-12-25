@@ -1,5 +1,7 @@
 /** @module */
 
+'use strict';
+
 /** A listener of store changes */
 class Listener {
   constructor(callback, watchedKeys) {
@@ -12,7 +14,7 @@ class Listener {
    * If no changedKeys or no watchedKeys - send it
    */
   notify(changedKeys, state, writableState) {
-    var isSend = false;
+    let isSend = false;
     if (this.watchedKeys && changedKeys) {
       isSend = this.watchedKeys.some(function(watchedKey) {
         return changedKeys.indexOf(watchedKey) >= 0;

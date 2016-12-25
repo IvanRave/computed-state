@@ -1,6 +1,6 @@
 {
   "name": "computed-state",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Observable computed state; calculated properties",
   "main": "index.js",
   "license": "Apache-2.0",
@@ -28,6 +28,6 @@
     "mocha": "3.x"
   },
   "dependencies": {
-    "extend": "^3.0.0"
+    "extend": "3.x"
   }
 }
