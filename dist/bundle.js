@@ -41,7 +41,7 @@ var getWritableProperties = function (obj) {
   var result = {};
 
   Object.keys(obj).forEach(function (key) {
-    if (!obj.__config[key].computed) {
+    if (!obj.__config[key].calculate) {
       var value = obj[key];
       if (value !== null && typeof value === 'object') {
         // objects
@@ -56,24 +56,167 @@ var getWritableProperties = function (obj) {
   return result;
 };
 
+/**
+ * @returns {*} Scope of async paths and functions
+ * 'student': asyncFunction
+ * 'student.rating': asyncFunction
+ * etc.
+ */
+var getAsyncPaths = function (obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(function (item) {
+      return getAsyncPaths(item);
+    });
+  }
+
+  var result = {};
+
+  Object.keys(obj).forEach(function (key) {
+    var keyConfig = obj.__config[key];
+    var calculateAsync = keyConfig.calculateAsync;
+    var watchedKeys = keyConfig.watchedKeys;
+
+    // if async exists
+    if (!calculateAsync || !watchedKeys) {
+      return;
+    }
+
+    var asyncWatchedValues = watchedKeys.map(function (watchedKey) {
+      return obj[watchedKey];
+    });
+
+    result[key] = {
+      propertyPath: key,
+      func: calculateAsync,
+      args: asyncWatchedValues
+    };
+
+    // TODO: inner properties with paths
+  });
+
+  return result;
+};
+
 var ComputedState = function () {
   function ComputedState(rootConfig) {
     _classCallCheck(this, ComputedState);
 
     this.state = new Computer(rootConfig);
     this.listeners = [];
+    this.asyncListeners = [];
+
+    /**
+     * Timeouts, XHR requests and other async instances
+     * To cancel it before new invocation
+     */
+    this.asyncCancels = {};
   }
+
+  /** Convert changed keys; notify listeners; run async handlers */
+
 
   _createClass(ComputedState, [{
     key: 'operate',
-    value: function operate(scopeOfChangedKeys) {
+    value: function operate(scopeOfChangedKeys, skippedPropertyKey) {
       if (!scopeOfChangedKeys || scopeOfChangedKeys.length === 0) {
         return;
       }
       // console.log('scopeOfChangedKeys', JSON.stringify(scopeOfChangedKeys));
+      // TODO: convert to changed paths instead keys (or add to output)
       var allChangedKeys = [];
       toPlainChangedKeys(scopeOfChangedKeys, allChangedKeys);
       this.ready(allChangedKeys);
+
+      // remove skipped items
+      var neededChangedKeys = allChangedKeys.filter(function (key) {
+        return key !== skippedPropertyKey;
+      });
+
+      if (neededChangedKeys.length > 0) {
+        this.handleAsyncProps(neededChangedKeys);
+      }
+    }
+
+    /**
+     * When the entire state is stabilized - run async operations:
+     * - get all async properties and functions
+     * - run it for changed paths (keys for this moment)
+     */
+
+  }, {
+    key: 'handleAsyncProps',
+    value: function handleAsyncProps(allChangedPaths) {
+      var asyncPaths = getAsyncPaths(this.state);
+
+      var that = this;
+
+      // Array of { func: func, args: args }
+      var changedAsyncPaths = [];
+
+      // TODO: if not yet fullfilled
+      // if (obj[key].data !== null) { return; }
+
+      Object.keys(asyncPaths).forEach(function (propertyPath) {
+        if (allChangedPaths.indexOf(propertyPath) < 0) {
+          return;
+        }
+        var obj = asyncPaths[propertyPath];
+        changedAsyncPaths.push(obj);
+      });
+
+      var maxAsyncCalls = changedAsyncPaths.length;
+      var changedAsyncKeys = changedAsyncPaths.map(function (item) {
+        return item.propertyPath;
+      });
+
+      changedAsyncPaths.forEach(function (asyncScope) {
+        var asyncFunction = asyncScope.func;
+        var asyncArgs = asyncScope.args;
+        var propertyPath = asyncScope.propertyPath;
+
+        // console.log('async', propertyPath);
+
+        var finish = function (propertyValue) {
+          // console.log('update...', propertyPath, propertyValue);
+          that._updateAsyncProperty(propertyPath, propertyValue);
+          // console.log('updated', propertyPath);
+
+          maxAsyncCalls -= 1;
+          if (maxAsyncCalls === 0) {
+            that.readyAsync(changedAsyncKeys);
+          }
+        };
+
+        var resolve = function (val) {
+          finish({
+            data: val,
+            error: null,
+            loading: false
+          });
+        };
+
+        var reject = function (err) {
+          finish({
+            data: null,
+            error: err,
+            loading: false
+          });
+        };
+
+        // Returns a Timeout for use with clearTimeout()
+        var allArgs = asyncArgs.concat([resolve, reject]);
+
+        // clean prev timeout
+        var prevCancelAsync = that.asyncCancels[propertyPath];
+        if (prevCancelAsync) {
+          prevCancelAsync();
+          delete that.asyncCancels[propertyPath];
+        }
+
+        // run computedAsync function
+        var cancelAsync = asyncFunction.apply(null, allArgs);
+        that.asyncCancels[propertyPath] = cancelAsync;
+      });
     }
 
     /** Copy an return a current state */
@@ -92,22 +235,24 @@ var ComputedState = function () {
   }, {
     key: 'getWritableState',
     value: function getWritableState() {
-      return getWritableProperties(this.state);
-    }
-  }, {
-    key: 'ready',
-    value: function ready(changedKeys) {
-      var state = this.getState();
-      var writableState = this.getWritableState();
-
-      this.listeners.forEach(function (listener) {
-        listener.notify(changedKeys, state, writableState);
-      });
+      var writableState = getWritableProperties(this.state);
+      // console.log('w', writableState);
+      return writableState;
     }
   }, {
     key: 'update',
     value: function update(props) {
       this.operate(this.state.update(props));
+    }
+
+    /** Update all properties, but skip re-async for async props */
+
+  }, {
+    key: '_updateAsyncProperty',
+    value: function _updateAsyncProperty(propertyPath, propertyValue) {
+      var upd = {};
+      upd[propertyPath] = propertyValue;
+      this.operate(this.state.update(upd), propertyPath);
     }
   }, {
     key: 'insertItem',
@@ -129,6 +274,37 @@ var ComputedState = function () {
     value: function subscribe(callback, watchedKeys) {
       this.listeners.push(new Listener(callback, watchedKeys));
     }
+  }, {
+    key: 'subscribeAsync',
+    value: function subscribeAsync(callback, watchedKeys) {
+      this.asyncListeners.push(new Listener(callback, watchedKeys));
+    }
+
+    /** When all sync operations are finished */
+
+  }, {
+    key: 'ready',
+    value: function ready(changedKeys) {
+      var state = this.getState();
+      var writableState = this.getWritableState();
+
+      this.listeners.forEach(function (listener) {
+        listener.notify(changedKeys, state, writableState);
+      });
+    }
+
+    /** When all async operations are finished */
+
+  }, {
+    key: 'readyAsync',
+    value: function readyAsync(changedAsyncKeys) {
+      var state = this.getState();
+      var writableState = this.getWritableState();
+
+      this.asyncListeners.forEach(function (listener) {
+        listener.notify(changedAsyncKeys, state, writableState);
+      });
+    }
   }]);
 
   return ComputedState;
@@ -146,6 +322,7 @@ var _createClass = function () { function defineProperties(target, props) { for 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 var Effect = require('./effect');
+var Setting = require('./setting');
 
 var PRIMARY_KEY = 'id';
 
@@ -162,9 +339,20 @@ var hasOwnProperty = function (inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
 };
 
+var extendConfig = function (config) {
+  var result = {};
+  Object.keys(config).forEach(function (propName) {
+    result[propName] = new Setting(propName, config[propName]);
+  });
+  return result;
+};
+
 /** A class to create calculated objects from specific configuration */
 
 var Computer = function () {
+  /**
+   * @param {Object} config Common config for all instances
+   */
   function Computer(config, initialProps) {
     _classCallCheck(this, Computer);
 
@@ -176,13 +364,13 @@ var Computer = function () {
     });
 
     Object.defineProperty(this, '__config', {
-      value: config,
+      value: extendConfig(config),
       writable: false,
       enumerable: false,
       configurable: false
     });
 
-    Object.keys(config).forEach(this._createProperty.bind(this, config));
+    Object.keys(this.__config).forEach(this._createProperty.bind(this));
 
     if (initialProps) {
       this.update(initialProps);
@@ -198,42 +386,26 @@ var Computer = function () {
 
   _createClass(Computer, [{
     key: '_createProperty',
-    value: function _createProperty(props, propName) {
-      var propSettings = props[propName];
-
-      var settingType = propSettings.type;
-      if (!settingType) {
-        throw new Error('required_type: ' + propName + ': ' + propSettings.type);
-      }
+    value: function _createProperty(propName) {
+      var propSettings = this.__config[propName];
 
       Object.defineProperty(this, propName, {
-        value: Array.isArray(settingType) ? [] : null,
+        value: Array.isArray(propSettings.type) ? [] : null,
         writable: true,
         enumerable: true,
         configurable: false
       });
 
-      if (propSettings.computed) {
-        this._attachComputedProps(propName, propSettings.computed);
+      if (propSettings.calculate) {
+        this._attachComputedProps(propName, propSettings.watchedKeys, propSettings.calculate);
       }
     }
   }, {
     key: '_attachComputedProps',
-    value: function _attachComputedProps(propName, settingComputed) {
-      var watchedKeys = settingComputed.slice(0, -1);
-      var calculation = settingComputed.slice(-1)[0];
-
-      if (!calculation || typeof calculation !== 'function') {
-        throw new Error('required_calculation_function: ' + propName);
-      }
-
-      if (!watchedKeys || watchedKeys.length < 1) {
-        throw new Error('required_array_of_watched_keys: ' + propName);
-      }
-
+    value: function _attachComputedProps(propName, watchedKeys, calculate) {
       watchedKeys.forEach(this._verifyWatchedKey.bind(this));
 
-      this.__effects.push(new Effect(this, propName, watchedKeys, calculation));
+      this.__effects.push(new Effect(this, propName, watchedKeys, calculate));
     }
 
     /** Wached properties must be declared before computed properties */
@@ -261,7 +433,7 @@ var Computer = function () {
         return new this.constructor(PropConfigType, value);
       }
 
-      throw new TypeError('required type: ' + PropConfigType);
+      throw new TypeError('required_type: ' + PropConfigType + ' for value: ' + value);
     }
 
     /**
@@ -294,9 +466,12 @@ var Computer = function () {
   }, {
     key: '_set',
     value: function _set(key, value) {
-      if (this.__config[key].computed) {
-        throw new Error('only_writable_properties_allowed:' + key);
+      var keyConfig = this.__config[key];
+      if (keyConfig.calculate && !keyConfig.calculateAsync) {
+        // at this moment async properties updated from outside (state)
+        throw new Error('only_writable_properties_allowed: ' + key);
       }
+
       this[key] = value;
       // console.log('set', key, value);
     }
@@ -311,7 +486,7 @@ var Computer = function () {
   }, {
     key: '_setComputed',
     value: function _setComputed(key, value) {
-      if (!this.__config[key].computed) {
+      if (!this.__config[key].calculate) {
         throw new Error('only_computed_properties_allowed:' + key);
       }
       this[key] = value;
@@ -537,7 +712,7 @@ var Computer = function () {
       var that = this;
 
       var scopeOfComputedPropNames = {};
-      //console.log('changedPropNames', changedPropNames, this);
+      // console.log('changedPropNames', changedPropNames, this);
       changedPropNames.forEach(function (changedPropName) {
         var computedPropNames = that._runPropEffects(changedPropName);
         scopeOfComputedPropNames[changedPropName] = computedPropNames;
@@ -637,7 +812,7 @@ var Computer = function () {
 
 module.exports = Computer;
 
-},{"./effect":3}],3:[function(require,module,exports){
+},{"./effect":3,"./setting":5}],3:[function(require,module,exports){
 /** @module */
 
 'use strict';
@@ -767,7 +942,112 @@ var Listener = function () {
 module.exports = Listener;
 
 },{}],5:[function(require,module,exports){
+/** @module */
+
+'use strict';
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+var areAllArgumentsFilled = function (args) {
+  var arr = Array.prototype.slice.call(args);
+  return arr.every(function (arg) {
+    if (typeof arg === 'undefined') {
+      throw new Error('argument_can_not_be_undefined: ' + arg);
+    }
+
+    return arg !== null;
+  });
+};
+
+/**
+ * Async properteis contains only computedAsync definition
+ * There is a default function to compute initial values for async properties (null values for data and error)
+ */
+var defaultComputedForAsync = function () {
+  if (areAllArgumentsFilled(arguments)) {
+    return { data: null, error: null, loading: true };
+  }
+
+  return null;
+};
+
+/** Async wrapper for initial types */
+var defaultTypeForAsync = function (initialType) {
+  return {
+    data: { type: initialType },
+    error: { type: String },
+    loading: { type: Boolean }
+    // null (not yet defined) or true
+    // isLoading: {
+    //   type: Boolean,
+    //   computed: ['data', 'error', function(data, error) {
+    //     //if (data === null && error === null) { return null; }
+    //     //return data === null && error === null;
+    //     return true;
+    //   }]
+    // }
+  };
+};
+
+/**
+ * Convert from JSON configuration to Setting model
+ * all async properties are computed
+ * all writable properties can not be async
+ * add a default computed function for async properties
+ */
+
+var Setting = function Setting(propName, propConfig) {
+  _classCallCheck(this, Setting);
+
+  if (!propConfig.type) {
+    throw new Error('required_type: ' + propName + ': ' + propConfig.type);
+  }
+
+  var computed = propConfig.computed;
+  var computedAsync = propConfig.computedAsync;
+
+  if (computed && computedAsync) {
+    throw new Error('use_computed_or_computedAsync: ' + propName);
+  }
+
+  // add a wrap for async properties
+  // Number -> Async(Number)
+  this.type = computedAsync ? defaultTypeForAsync(propConfig.type) : propConfig.type;
+
+  // exit for simple writable properties
+  // continue for computed props
+  if (!computed && !computedAsync) {
+    return;
+  }
+
+  this.watchedKeys = (computed || computedAsync).slice(0, -1);
+
+  if (!this.watchedKeys || this.watchedKeys.length < 1) {
+    throw new Error('required_array_of_watched_keys: ' + propName);
+  }
+
+  // TODO: add default behavior for all computed properties:
+  // if (areAllArgumentsFilled(arguments) === false) return null;
+  this.calculate = computedAsync ? defaultComputedForAsync : computed.slice(-1)[0];
+
+  if (!this.calculate || typeof this.calculate !== 'function') {
+    throw new Error('required_calculation_function: ' + propName);
+  }
+
+  // additional function only for async props
+  if (computedAsync) {
+    this.calculateAsync = computedAsync.slice(-1)[0];
+
+    if (!this.calculateAsync || typeof this.calculateAsync !== 'function') {
+      throw new Error('required_async_calculation_function: ' + propName);
+    }
+  }
+};
+
+module.exports = Setting;
+
+},{}],6:[function(require,module,exports){
 var ComputedState = require('./src/computed-state');
 window.ComputedState = ComputedState;
 
-},{"./src/computed-state":1}]},{},[5]);
+},{"./src/computed-state":1}]},{},[6]);

@@ -1,6 +1,6 @@
 {
   "name": "computed-state",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Observable computed state; calculated properties",
   "main": "index.js",
   "license": "Apache-2.0",

@@ -3,6 +3,7 @@
 'use strict';
 
 const Effect = require('./effect');
+const Setting = require('./setting');
 
 const PRIMARY_KEY = 'id';
 
@@ -19,8 +20,20 @@ const hasOwnProperty = function(inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
 };
 
+const extendConfig = function(config) {
+  var result = {};
+  Object.keys(config).forEach(function(propName) {
+    result[propName] = new Setting(propName, config[propName]);
+  });
+  return result;
+};
+
+
 /** A class to create calculated objects from specific configuration */
 class Computer {
+  /**
+   * @param {Object} config Common config for all instances
+   */
   constructor(config, initialProps) {
     Object.defineProperty(this, '__effects', {
       value: [],
@@ -30,13 +43,13 @@ class Computer {
     });
 
     Object.defineProperty(this, '__config', {
-      value: config,
+      value: extendConfig(config),
       writable: false,
       enumerable: false,
       configurable: false
     });
 
-    Object.keys(config).forEach(this._createProperty.bind(this, config));
+    Object.keys(this.__config).forEach(this._createProperty.bind(this));
 
     if (initialProps) {
       this.update(initialProps);
@@ -48,44 +61,30 @@ class Computer {
    * - for primitives and nested objects: null
    * - for arrays: [] (can not be null)
    */
-  _createProperty(props, propName) {
-    const propSettings = props[propName];
-
-    const settingType = propSettings.type;
-    if (!settingType) {
-      throw new Error('required_type: ' + propName + ': ' + propSettings.type);
-    }
+  _createProperty(propName) {
+    const propSettings = this.__config[propName];
 
     Object.defineProperty(this, propName, {
-      value: Array.isArray(settingType) ? [] : null,
+      value: Array.isArray(propSettings.type) ? [] : null,
       writable: true,
       enumerable: true,
       configurable: false
     });
 
-    if (propSettings.computed) {
-      this._attachComputedProps(propName, propSettings.computed);
+    if (propSettings.calculate) {
+      this._attachComputedProps(propName,
+                                propSettings.watchedKeys,
+                                propSettings.calculate);
     }
   }
 
-  _attachComputedProps(propName, settingComputed) {
-    const watchedKeys = settingComputed.slice(0, -1);
-    const calculation = settingComputed.slice(-1)[0];
-
-    if (!calculation || typeof calculation !== 'function') {
-      throw new Error('required_calculation_function: ' + propName);
-    }
-
-    if (!watchedKeys || watchedKeys.length < 1) {
-      throw new Error('required_array_of_watched_keys: ' + propName);
-    }
-
+  _attachComputedProps(propName, watchedKeys, calculate) {
     watchedKeys.forEach(this._verifyWatchedKey.bind(this));
 
     this.__effects.push(new Effect(this,
                                    propName,
                                    watchedKeys,
-                                   calculation));
+                                   calculate));
   }
 
   /** Wached properties must be declared before computed properties */
@@ -109,7 +108,7 @@ class Computer {
       return new this.constructor(PropConfigType, value);
     }
 
-    throw new TypeError('required type: ' + PropConfigType);
+    throw new TypeError('required_type: ' + PropConfigType + ' for value: ' + value);
   }
 
   /**
@@ -137,9 +136,13 @@ class Computer {
   }
 
   _set(key, value) {
-    if (this.__config[key].computed) {
-      throw new Error('only_writable_properties_allowed:' + key);
+    var keyConfig = this.__config[key];
+    if (keyConfig.calculate &&
+       !keyConfig.calculateAsync) {
+      // at this moment async properties updated from outside (state)
+      throw new Error('only_writable_properties_allowed: ' + key);
     }
+
     this[key] = value;
     // console.log('set', key, value);
   }
@@ -151,7 +154,7 @@ class Computer {
    *   does not work in PhantomJS: https://github.com/ariya/phantomjs/issues/11856
    */
   _setComputed(key, value) {
-    if (!this.__config[key].computed) {
+    if (!this.__config[key].calculate) {
       throw new Error('only_computed_properties_allowed:' + key);
     }
     this[key] = value;

@@ -69,5 +69,68 @@ var callback = function(changedKeys, stateNew) { };
 state.subscribe(callback, ['watchedKeys']);
 ```
 
+Async properties
+---
 
-Inspired by [Polymer](https://github.com/Polymer/polymer)
+Usage:
+
+- Load external data, like XHR ajax requests
+- Timeouts
+- Promises
+- DOM manipulation
+- etc.
+
+```
+module.exports = {
+  // simple writable property
+  endpoint: { type: String },
+  // async computed property
+  weather: {
+    type: Number,
+    computedAsync: ['endpoint', function(endpoint, resolve, reject) {
+      if (endpoint === null) { return null; }
+      // update externally
+      var timeoutInstance = setTimeout(function() {
+        var demoWeather = 32;
+        resolve(demoWeather);
+        // reject('error message or code');
+      }, 500);
+
+      // return a function that cancels this timeout
+      return clearTimeout.bind(null, timeoutInstance);
+    }]
+  },
+  // a computed property, based on 'weather' async property
+  weatherMessage: {
+    type: String,
+    computed: ['weather', function(weatherAsync) {
+      if (weatherAsync === null || weatherAsync.data === null) {
+         return null;
+      }
+      return 'The weather is ' + weatherAsync.data;
+    }]
+  }
+```
+
+How async works:
+
+- a user updates 'endpoint' = 'someUrl'
+
+Sync computation:
+
+- recalculates 'weather': set to null
+- recalculates 'weatherMessage': set to null
+
+Async computation:
+
+- runs async 'weather' calculation (automatically)
+- recalculates 'weather': set to { data: 32, error: null }
+- recalculates 'weatherMessage': set to 'The weather is 32'
+
+
+Inspired by:
+---
+
+- Google Sheets
+- [Polymer](https://www.polymer-project.org/1.0/docs/devguide/observers)
+- [Knockout](https://github.com/knockout/knockout/wiki/asynchronous-dependent-observables)
