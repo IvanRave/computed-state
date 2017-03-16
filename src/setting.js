@@ -1,4 +1,10 @@
-/** @module */
+/**
+ * Creates an internal object from readable settings
+ * - async type
+ * - computed function + watched keys
+ * @todo: precompile these objects from config
+ * @module
+ */
 
 'use strict';
 
@@ -14,8 +20,9 @@ const areAllArgumentsFilled = function(args) {
 };
 
 /**
- * Async properteis contains only computedAsync definition
+ * Async properties contains only computedAsync definition
  * There is a default function to compute initial values for async properties (null values for data and error)
+ * @returns {Object} Default object for computed async
  */
 const defaultComputedForAsync = function() {
   if (areAllArgumentsFilled(arguments)) {
@@ -25,22 +32,13 @@ const defaultComputedForAsync = function() {
   return null;
 };
 
-/** Async wrapper for initial types */
-const defaultTypeForAsync = function(initialType) {
-  return {
-    data: { type: initialType },
-    error: { type: String },
-    loading: { type: Boolean }
-    // null (not yet defined) or true
-    // isLoading: {
-    //   type: Boolean,
-    //   computed: ['data', 'error', function(data, error) {
-    //     //if (data === null && error === null) { return null; }
-    //     //return data === null && error === null;
-    //     return true;
-    //   }]
-    // }
-  };
+const buildSettings = function(config) {
+  var settings = {};
+  Object.keys(config).forEach(function(propName) {
+    settings[propName] = new Setting(propName, config[propName]); // eslint-disable-line
+  });
+
+  return settings;
 };
 
 /**
@@ -55,16 +53,57 @@ class Setting {
       throw new Error('required_type: ' + propName + ': ' + propConfig.type);
     }
 
-    var computed = propConfig.computed;
-    var computedAsync = propConfig.computedAsync;
+    const computed = propConfig.computed;
+    const computedAsync = propConfig.computedAsync;
 
     if (computed && computedAsync) {
       throw new Error('use_computed_or_computedAsync: ' + propName);
     }
 
-    // add a wrap for async properties
-    // Number -> Async(Number)
-    this.type = computedAsync ? defaultTypeForAsync(propConfig.type) : propConfig.type;
+    if (!propConfig.type || typeof propConfig.type !== 'string') {
+      throw new Error('required_prop_type_string: ' + propName);
+    }
+
+    if (computedAsync) {
+      const defaultAsyncConfig = {
+        data: {
+          type: propConfig.type,
+          label: propConfig.label,
+          schema: propConfig.schema,
+          ref: propConfig.ref
+        },
+        error: {
+          type: 'Text',
+          label: 'Error'
+        },
+        // TODO: to computed
+        // if data is null and error is null, then loading?
+        loading: {
+          type: 'Boolean',
+          label: 'Loading'
+        }
+      };
+
+      this.type = 'Item';
+      this.label = 'AsyncItem';
+      this.refSettings = buildSettings(defaultAsyncConfig);
+      this.schema = 'AsyncItem';
+    } else {
+      this.type = propConfig.type;
+      // <label>My input</label> for according input or span
+      this.label = propConfig.label;
+
+      if (propConfig.ref) {
+        // TODO: combine ref + schema
+        // this.ref = propConfig.ref;
+        this.refSettings = buildSettings(propConfig.ref);
+      }
+
+      if (propConfig.schema) {
+        // http://schema.org
+        this.schema = propConfig.schema;
+      }
+    }
 
     // exit for simple writable properties
     // continue for computed props

@@ -1,8 +1,8 @@
 module.exports = {
-  endpoint: { type: String },
+  endpoint: { type: 'Text' },
   weather: {
-    type: Number,
-    computedAsync: ['endpoint', function(endpoint, resolve, reject) {
+    type: 'Integer',
+    computedAsync: ['endpoint', function(endpoint, resolve) { // reject
       if (endpoint === null) { return null; }
       console.log('run async weather');
       // update externally
@@ -16,7 +16,7 @@ module.exports = {
     }]
   },
   weatherMessage: {
-    type: String,
+    type: 'Text',
     computed: ['weather', function(prom) {
       if (prom === null || prom.data === null) { return null; }
       return 'The weather is ' + prom.data;

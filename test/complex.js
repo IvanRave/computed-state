@@ -1,25 +1,83 @@
-var range = require('./range');
-
-module.exports = {
-  name: { type: String },
-  ageRange: { type: range },
-  isNameValid: {
-    type: Boolean,
-    computed: ['name', (name) => {
-      if (name !== null) { return name.length >= 3; }
-      return null;
+var person = {
+  id: { type: 'Text' },
+  name: { type: 'Text' },
+  cname: {
+    type: 'Text',
+    computed: ['name', function (name) {
+      if (name === null) { return null; }
+      return 'c' + name;
     }]
   },
-  isValid: {
-    type: Boolean,
-    computed: ['isNameValid', 'ageRange', function(isNameValid, ageRange) {
-      if (isNameValid !== null &&
-          ageRange !== null &&
-          ageRange.duration !== null) {
-        return ageRange.duration > 50 && isNameValid;
-      }
+  birthDate: { type: 'Date' }
+};
 
-      return null;
+// member (subscription)
+// http://app_domain/groups/2/members/5
+// http://app_domain/persons/8/members/5
+// or http://app_domain/members/5 - independent entity
+var member = {
+  // subscription_id: http://app_domain/members/345
+  id: { type: 'Integer' },
+
+  cid: {
+    type: 'Text',
+    computed: ['id', function (id) {
+      if (id === null) { return null; }
+      return 'c' + id;
     }]
+  },
+  // when this subscription is created
+  created: { type: 'Date' },
+  level: { type: 'Integer' }, // level in current group
+  // person_reference: 'http://app_domain/persons/234', type 'String'
+  person: {
+    type: 'Item', // usually it is a person_id, just address to some place, type: 'Integer'|'String'
+    ref: person, // from 'persons' table foreign key
+    table: 'persons'
   }
+  // group_reference: 'http://app_domain/groups/456'
+  // type: 'URL', name: 'Group', ref: 'groups'
+};
+
+var group = {
+  id: { type: 'Text' },
+
+  name: { type: 'Text' },
+
+  // select * from members where group_id = id (group_ref = this)
+  // <div itemprop="members" itemscope itemtype="ItemList">
+  //   <div itemprop="ItemListElement" itemscope itemtype="Member">
+  members: {
+    type: 'ItemList',
+    // schema: 'Member',
+    ref: member
+  },
+
+  // insert into persons (id, name) values (3, 'Jane')
+  // insert into members (id, person_id, group_id) values (1, 3, id)
+
+  // or insert into group.members (id, person) values (1, {3, 'Jane'})
+  // <div itemprop="captain" itemscope itemtype="Member">
+  captain: {
+    type: 'Item', // or 'Scope'
+    // schema: 'Member',
+    ref: member // use schema.get('Member')
+  }
+
+  // teachers, etc.
+};
+
+module.exports = {
+  groups: {
+    type: 'ItemList',
+    ref: group
+  },
+  persons: {
+    type: 'ItemList',
+    ref: person
+  }
+  // members: {
+  //   type: 'ItemList',
+  //   ref: member
+  // }
 };

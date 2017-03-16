@@ -1,7 +1,7 @@
 {
   "name": "computed-state",
-  "version": "0.4.0",
-  "description": "Observable computed state; calculated properties",
+  "version": "0.5.0",
+  "description": "Observable computed state; calculated properties; NoSQL view model",
   "main": "index.js",
   "license": "Apache-2.0",
   "repository": {
@@ -11,12 +11,10 @@
   "scripts": {
     "test": "mocha",
     "build": "browserify window-global.js -o dist/bundle.js -t [ babelify ]",
-    "build-test": "browserify test.js -o test-bundle.js",
     "serve": "http-server -p 8082",
-    "lint": "eslint src/**"
+    "lint": "eslint src/*"
   },
   "devDependencies": {
-    "babel-plugin-transform-es2015-arrow-functions": "6.x",
     "babel-plugin-transform-es2015-block-scoping": "6.x",
     "babel-plugin-transform-es2015-classes": "6.x",
     "babelify": "7.x",
@@ -25,7 +23,10 @@
     "eslint": "3.x",
     "eslint-config-airbnb-base": "10.x",
     "eslint-plugin-import": "2.x",
-    "mocha": "3.x"
+    "jsdom": "9.x",
+    "jsdom-global": "2.x",
+    "mocha": "3.x",
+    "moment": "2.x"
   },
   "dependencies": {
     "extend": "3.x"

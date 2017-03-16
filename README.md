@@ -5,16 +5,20 @@ computed-state
 
 Observable computed state
 
+[Более подробно на русском языке](./README-RU.md)
+
+
 ```
-// range.js
+// event-config.js
 module.exports = {
-  start: { type: Number },
-  end: { type: Number },
+  start: { type: 'Number' },
+  end: { type: 'Number' },
   duration: {
-    type: Number,
+    type: 'Number',
     computed: ['start', 'end', function(start, end) {
-      if (start !== null && end !== null) { return end - start; }
-      return null;
+      if (start === null || end === null) { return null; }
+
+      return end - start;
     }]
   }
 };
@@ -22,16 +26,16 @@ module.exports = {
 
 ```
 // main.js
-var state = new ComputedState(range);
+var state = new ComputedState(eventConfig);
 
-state.subscribe(function(changedKeys, stateNew) {
+state.subscribe(function(changedKeys, event) {
       expect(changedKeys).to.deep.equal([
         'start', 'end', 'duration'
       ]);
 
-      expect(stateNew.start).to.equal(15);
-      expect(stateNew.end).to.equal(24);
-      expect(stateNew.duration).to.equal(9);
+      expect(event.start).to.equal(15);
+      expect(event.end).to.equal(24);
+      expect(event.duration).to.equal(9);
       done();
 });
 

@@ -4,19 +4,19 @@
 
 const Listener = require('./listener');
 const Computer = require('./computer');
+const Setting = require('./setting');
 
-const toPlainChangedKeys = function(scope, target) {
-  if (!scope) { throw new Error('toPlainChangedKeys_scope_required'); }
+const toPlainChangedPaths = function(scope, target) {
+  if (!scope) { throw new Error('toPlainChangedPaths_scope_required'); }
 
   if (Array.isArray(scope) === true) {
     scope.forEach(function(item) {
-      toPlainChangedKeys(item, target);
+      toPlainChangedPaths(item, target);
     });
   } else {
-    // if Object
     Object.keys(scope).forEach(function(key) {
       if (target.indexOf(key) < 0) { target.push(key); }
-      toPlainChangedKeys(scope[key], target);
+      toPlainChangedPaths(scope[key], target);
     });
   }
 };
@@ -32,7 +32,7 @@ const getWritableProperties = function(obj) {
   const result = {};
 
   Object.keys(obj).forEach(function(key) {
-    if (!obj.__config[key].calculate) {
+    if (!obj.__settings[key].calculate) {
       const value = obj[key];
       if (value !== null && typeof value === 'object') {
         // objects
@@ -63,9 +63,9 @@ const getAsyncPaths = function(obj) {
   const result = {};
 
   Object.keys(obj).forEach(function(key) {
-    var keyConfig = obj.__config[key];
-    var calculateAsync = keyConfig.calculateAsync;
-    var watchedKeys = keyConfig.watchedKeys;
+    var propSetting = obj.__settings[key];
+    var calculateAsync = propSetting.calculateAsync;
+    var watchedKeys = propSetting.watchedKeys;
 
     // if async exists
     if (!calculateAsync || !watchedKeys) { return; }
@@ -86,17 +86,50 @@ const getAsyncPaths = function(obj) {
   return result;
 };
 
+/**
+ * @param {Function} callback Executed when keys are changed
+ * @param {String[]} watchedKeys List of property keys
+ * @todo watchedPaths instead keys
+ * @param {Listener[]} anyListeners List of async or usual listeners
+ * @returns {Function} unsubscribe - remove subscription
+ */
+const subscribeAny = function(callback, watchedKeys, anyListeners) {
+  const listener = new Listener(callback, watchedKeys);
+  anyListeners.push(listener);
+  return function() {
+    const index = anyListeners.indexOf(listener);
+    anyListeners.splice(index, 1);
+  };
+};
+
+/**
+ * Build settings from config
+ * config is more readable; settings - usable
+ * @param {Object} config { name: {type:'Text'}, ... }
+ * @returns {Object} Scope of instances of settings
+ */
+const buildSettings = function(config) {
+  var settings = {};
+  Object.keys(config).forEach(function(propName) {
+    settings[propName] = new Setting(propName, config[propName]);
+  });
+
+  return settings;
+};
+
 class ComputedState {
   constructor(rootConfig) {
-    this.state = new Computer(rootConfig);
-    this.listeners = [];
-    this.asyncListeners = [];
+    const rootSettings = buildSettings(rootConfig);
+
+    this._rootEntity = new Computer(rootSettings);
+    this._listeners = [];
+    this._asyncListeners = [];
 
     /**
      * Timeouts, XHR requests and other async instances
      * To cancel it before new invocation
      */
-    this.asyncCancels = {};
+    this._asyncCancels = {};
   }
 
   /** Convert changed keys; notify listeners; run async handlers */
@@ -106,17 +139,17 @@ class ComputedState {
     }
     // console.log('scopeOfChangedKeys', JSON.stringify(scopeOfChangedKeys));
     // TODO: convert to changed paths instead keys (or add to output)
-    const allChangedKeys = [];
-    toPlainChangedKeys(scopeOfChangedKeys, allChangedKeys);
-    this.ready(allChangedKeys);
+    const allChangedPaths = [];
+    toPlainChangedPaths(scopeOfChangedKeys, allChangedPaths);
+    this.ready(allChangedPaths);
 
     // remove skipped items
-    var neededChangedKeys = allChangedKeys.filter(function(key) {
+    const neededChangedPaths = allChangedPaths.filter(function(key) {
       return key !== skippedPropertyKey;
     });
 
-    if (neededChangedKeys.length > 0) {
-      this.handleAsyncProps(neededChangedKeys);
+    if (neededChangedPaths.length > 0) {
+      this.handleAsyncProps(neededChangedPaths);
     }
   }
 
@@ -126,7 +159,7 @@ class ComputedState {
    * - run it for changed paths (keys for this moment)
    */
   handleAsyncProps(allChangedPaths) {
-    const asyncPaths = getAsyncPaths(this.state);
+    const asyncPaths = getAsyncPaths(this._rootEntity);
 
     var that = this;
 
@@ -141,7 +174,6 @@ class ComputedState {
       var obj = asyncPaths[propertyPath];
       changedAsyncPaths.push(obj);
     });
-
 
     var maxAsyncCalls = changedAsyncPaths.length;
     var changedAsyncKeys = changedAsyncPaths.map(function(item) {
@@ -186,79 +218,78 @@ class ComputedState {
       var allArgs = asyncArgs.concat([resolve, reject]);
 
       // clean prev timeout
-      var prevCancelAsync = that.asyncCancels[propertyPath];
+      var prevCancelAsync = that._asyncCancels[propertyPath];
       if (prevCancelAsync) {
         prevCancelAsync();
-        delete that.asyncCancels[propertyPath];
+        delete that._asyncCancels[propertyPath];
       }
 
       // run computedAsync function
       var cancelAsync = asyncFunction.apply(null, allArgs);
-      that.asyncCancels[propertyPath] = cancelAsync;
+      that._asyncCancels[propertyPath] = cancelAsync;
     });
   }
 
   /** Copy an return a current state */
-  getState() {
-    return JSON.parse(JSON.stringify(this.state));
+  getEntity() {
+    return this._rootEntity;
+    // TODO: or copy
+    // return JSON.parse(JSON.stringify(this._rootEntity));
   }
 
   /**
    * @returns {Object} Scope of writable properties (without computed)
    *  e.g: to backup it
    */
-  getWritableState() {
-    const writableState = getWritableProperties(this.state);
+  getWritableEntity() {
+    const writableEntity = getWritableProperties(this._rootEntity);
     // console.log('w', writableState);
-    return writableState;
+    return writableEntity;
   }
 
-  update(props) {
-    this.operate(this.state.update(props));
+  update(paths) {
+    this.operate(this._rootEntity.update(paths));
   }
 
   /** Update all properties, but skip re-async for async props */
   _updateAsyncProperty(propertyPath, propertyValue) {
     var upd = {};
     upd[propertyPath] = propertyValue;
-    this.operate(this.state.update(upd), propertyPath);
+    this.operate(this._rootEntity.update(upd), propertyPath);
   }
 
-  insertItem(propName, item) {
-    this.operate(this.state.insertItem(propName, item));
-  }
-  removeItem(propName, id) {
-    this.operate(this.state.removeItem(propName, id));
+  insertItem(propertyPath, item) {
+    this.operate(this._rootEntity.insertItem(propertyPath, item));
   }
 
-  pingState() {
-    this.ready([]);
+  removeItem(propertyPath, id) {
+    this.operate(this._rootEntity.removeItem(propertyPath, id));
   }
 
   subscribe(callback, watchedKeys) {
-    this.listeners.push(new Listener(callback, watchedKeys));
+    return subscribeAny(callback, watchedKeys, this._listeners);
   }
 
   subscribeAsync(callback, watchedKeys) {
-    this.asyncListeners.push(new Listener(callback, watchedKeys));
+    return subscribeAny(callback, watchedKeys, this._asyncListeners);
   }
 
   /** When all sync operations are finished */
   ready(changedKeys) {
-    const state = this.getState();
-    const writableState = this.getWritableState();
+    const state = this.getEntity();
+    const writableState = this.getWritableEntity();
 
-    this.listeners.forEach(function(listener) {
+    this._listeners.forEach(function(listener) {
       listener.notify(changedKeys, state, writableState);
     });
   }
 
   /** When all async operations are finished */
   readyAsync(changedAsyncKeys) {
-    const state = this.getState();
-    const writableState = this.getWritableState();
+    const state = this.getEntity();
+    const writableState = this.getWritableEntity();
 
-    this.asyncListeners.forEach(function(listener) {
+    this._asyncListeners.forEach(function(listener) {
       listener.notify(changedAsyncKeys, state, writableState);
     });
   }

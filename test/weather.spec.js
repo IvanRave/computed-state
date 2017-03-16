@@ -32,7 +32,7 @@ describe('weather', function() {
           error: null,
           loading: true
         });
-        
+
         expect(state.weatherMessage).to.null;
 
         subNumber += 1;

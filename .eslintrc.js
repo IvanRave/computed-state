@@ -17,7 +17,8 @@ module.exports = {
     // http://eslint.org/docs/rules/brace-style
     "indent": [
       "error",
-      2
+      2,
+      { "SwitchCase": 1 }
     ],
     "linebreak-style": [
       "error",
@@ -32,14 +33,16 @@ module.exports = {
       "always"
     ],
     "arrow-body-style": "off",
-    "valid-jsdoc": "warn",
+    "valid-jsdoc": "off",
     "eol-last": "warn",
     "key-spacing": "off",
     "comma-dangle": "off",
     "object-shorthand": "off",
     "global-require": "off",
     "func-names": "off",
+    "prefer-spread": "off",
     "prefer-arrow-callback": "off",
+    "prefer-rest-params": "off",
     "padded-blocks": "warn",
     "prefer-template": "off",
     "vars-on-top": "off",
@@ -47,8 +50,8 @@ module.exports = {
     "quote-props": "off",
     "no-unused-expressions": "off",
     "no-underscore-dangle": "off",
-    "no-var": "warn",
-    "strict": "warn",
+    "no-var": "off",
+    "strict": "off",
     "no-param-reassign": "warn",
     "no-console": "off",
     "spaced-comment": "warn",

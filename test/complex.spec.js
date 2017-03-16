@@ -2,75 +2,139 @@ var expect = require('chai').expect;
 var State = require('../src/computed-state');
 var complex = require('./complex');
 
+var personJane = {
+  id: 'Jane',
+  name: 'Jane'
+};
+
+var personJohn = {
+  id: 'John',
+  name: 'John'
+};
+
+var someGroup = {
+  id: '5A',
+  name: 'BestGroup',
+  members: [{
+    id: 30,
+    level: 30,
+    person: personJane
+  }, {
+    id: 70,
+    level: 70,
+    person: personJohn
+  }],
+  // data duplicate (foreign_key in rdbms)
+  captain: {
+    id: 70,
+    level: 70,
+    person: personJohn
+  }
+};
+
 describe('store', function() {
-  var state;
+  var store;
   beforeEach(function() {
-    state = new State(complex);
+    store = new State(complex);
+    store.update({
+      groups: [someGroup],
+      persons: [personJane, personJohn]
+    });
   });
 
-  afterEach(function() { state = null; });
+  afterEach(function() {
+    store = null;
+  });
 
   it('should update name', function(done) {
-    state.subscribe(function(changedKeys, state) {
-      expect(changedKeys).to.deep.equal([
-        'name', 'isNameValid'
-      ]);
-
-      expect(state.name).to.equal('Kate');
-      expect(state.isNameValid).to.true;
+    store.subscribe(function(changedKeys, state) {
+      expect(changedKeys).to.deep.equal(['groups']);
+      expect(state.groups[0].name).to.equal('SuperGroup');
       done();
     });
 
-    state.update({ name: 'Kate' });
+    var upd = {};
+    upd['groups.5A.name'] = 'SuperGroup';
+    store.update(upd);
   });
 
-  it('should update ageRange', function(done) {
-    state.subscribe(function(changedKeys, state) {
-      expect(changedKeys).to.deep.equal([
-        'ageRange', 'name', 'isNameValid', 'isValid'
-      ]);
+  it('should insert group', function(done) {
+    store.subscribe(function(changedKeys, state) {
+      expect(changedKeys).to.deep.equal(['groups']);
 
-      expect(state.ageRange.start).to.equal(18);
-      expect(state.isValid).to.equal(true);
+      expect(state.groups.length).to.equal(2);
       done();
     });
 
-    state.update({
-      ageRange: { start: 18, end: 120 },
-      name: 'Kate'
+    store.insertItem('groups', {
+      id: '5B',
+      name: 'MiddleGroup'
     });
   });
 
-  it('should update ageRange', function(done) {
-    state.update({
-      ageRange: { start: 18, end: 120 },
-      name: 'Kate'
+  it('should remove group', function(done) {
+    store.insertItem('groups', {
+      id: '5B',
+      name: 'MiddleGroup'
     });
 
-    state.subscribe(function(changedKeys, state) {
-      expect(changedKeys).to.deep.equal([
-        'ageRange'
-      ]);
+    store.subscribe(function(changedKeys, state) {
+      expect(changedKeys).to.deep.equal(['groups']);
 
-      expect(state.ageRange.start).to.equal(16);
+      expect(state.groups.length).to.equal(1);
+      expect(state.groups[0].name).to.equal('MiddleGroup');
       done();
     });
 
-    state.update({
-      'ageRange.start': 16
+    store.removeItem('groups', '5A');
+  });
+
+  it('should insert member to group', function(done) {
+    store.subscribe(function(changedKeys, state) {
+      expect(changedKeys).to.deep.equal(['groups']);
+
+      expect(state.groups.length).to.equal(1);
+      expect(state.groups[0].members.length).to.equal(3);
+      expect(state.groups[0].members[2].id).to.equal(12345);
+      expect(state.groups[0].members[2].cid).to.equal('c12345');
+      // person is required
+      expect(state.groups[0].members[2].person).to.deep.equal({
+        id: 'Jill',
+        name: 'Jill',
+        cname: 'cJill',
+        birthDate: null
+      });
+      done();
+    });
+
+    store.insertItem('groups.5A.members', {
+      id: 12345,
+      created: '2010-01-01',
+      person: {
+        id: 'Jill',
+        name: 'Jill'
+      }
     });
   });
 
-  it('should return only writable properties', function() {
-    state.update({ ageRange: { start: 18 }});
+  it('should remove member from a group', function(done) {
+    store.subscribe(function(changedKeys, state) {
+      expect(changedKeys).to.deep.equal(['groups']);
 
-    var result = state.getWritableState();
-    expect(result).to.deep.equal({
-      ageRange: {
-        start: 18,
-        end: null
-      },
-      name: null
+      expect(state.groups.length).to.equal(1);
+      expect(state.groups[0].members.length).to.equal(1);
+      expect(state.groups[0].members[0].id).to.equal(70);
+      expect(state.groups[0].members[0].cid).to.equal('c70');
+      expect(state.groups[0].members[0].person).to.deep.equal({
+        id: 'John',
+        birthDate: null,
+        cname: 'cJohn',
+        name: 'John'
+      });
+
+      done();
     });
+
+    store.removeItem('groups.5A.members', 30);
   });
 });

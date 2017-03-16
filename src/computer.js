@@ -3,7 +3,6 @@
 'use strict';
 
 const Effect = require('./effect');
-const Setting = require('./setting');
 
 const PRIMARY_KEY = 'id';
 
@@ -16,25 +15,34 @@ const findIndexByPrimaryKey = function(list, primaryKey) {
   return -1;
 };
 
+const findItemByPrimaryKey = function(list, primaryKeyString) {
+  return list.filter(function(elem) {
+    // country['id'] === 'usa'
+    // 'members.5.name' -  typeof '5' === 'string'
+    return (elem[PRIMARY_KEY] + '') === primaryKeyString;
+  })[0];
+};
+
 const hasOwnProperty = function(inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
 };
 
-const extendConfig = function(config) {
-  var result = {};
-  Object.keys(config).forEach(function(propName) {
-    result[propName] = new Setting(propName, config[propName]);
-  });
-  return result;
+const pathToLevels = function(propertyPath) {
+  return propertyPath.split('.');
 };
 
+const levelsToPath = function(levels) {
+  return levels.join('.');
+};
 
 /** A class to create calculated objects from specific configuration */
 class Computer {
   /**
-   * @param {Object} config Common config for all instances
+   * @param {Object} settings Common settings for all instances
    */
-  constructor(config, initialProps) {
+  constructor(settings) {
+    if (!settings) { throw new Error('settings_required'); }
+
     Object.defineProperty(this, '__effects', {
       value: [],
       writable: false,
@@ -42,39 +50,38 @@ class Computer {
       configurable: false
     });
 
-    Object.defineProperty(this, '__config', {
-      value: extendConfig(config),
+    // save settings for future using
+    Object.defineProperty(this, '__settings', {
+      value: settings,
       writable: false,
       enumerable: false,
       configurable: false
     });
 
-    Object.keys(this.__config).forEach(this._createProperty.bind(this));
-
-    if (initialProps) {
-      this.update(initialProps);
-    }
+    // create properties from settings
+    Object.keys(this.__settings)
+      .forEach(this._createProperty.bind(this));
   }
 
   /**
-   * Default values for properties:
-   * - for primitives and nested objects: null
-   * - for arrays: [] (can not be null)
+   * Default value for properties: null
+   * @param {String} propName Property name, like 'birthDate'
+   * @returns {Object} Result of creation
    */
   _createProperty(propName) {
-    const propSettings = this.__config[propName];
+    const propertySetting = this.__settings[propName];
 
     Object.defineProperty(this, propName, {
-      value: Array.isArray(propSettings.type) ? [] : null,
+      value: propertySetting.type === 'ItemList' ? [] : null,
       writable: true,
       enumerable: true,
       configurable: false
     });
 
-    if (propSettings.calculate) {
+    if (propertySetting.calculate) {
       this._attachComputedProps(propName,
-                                propSettings.watchedKeys,
-                                propSettings.calculate);
+        propertySetting.watchedKeys,
+        propertySetting.calculate);
     }
   }
 
@@ -82,38 +89,39 @@ class Computer {
     watchedKeys.forEach(this._verifyWatchedKey.bind(this));
 
     this.__effects.push(new Effect(this,
-                                   propName,
-                                   watchedKeys,
-                                   calculate));
+      propName,
+      watchedKeys,
+      calculate));
   }
 
-  /** Wached properties must be declared before computed properties */
+  /**
+   * Wached properties must be declared before computed properties
+   * @param {String} watchedKey One of ['firstName', 'lastName']
+   * @returns {*} Result of verification
+   */
   _verifyWatchedKey(watchedKey) {
     if (!watchedKey || hasOwnProperty(this, watchedKey) === false) {
       throw new Error('required_dependent_property: ' + watchedKey);
     }
   }
 
-  _createByType(PropConfigType, value) {
-    // if String, Number, Boolean - just return the value
-    if (value.constructor === PropConfigType) {
-      return value;
-    }
-
-    // if own config type, like 'range', 'phone'
-    //   return a computed instance of own type
-    if (typeof PropConfigType === 'object') {
-      // console.log('object', this.constructor);
-      // console.log('new object, based', value);
-      return new this.constructor(PropConfigType, value);
-    }
-
-    throw new TypeError('required_type: ' + PropConfigType + ' for value: ' + value);
+  /**
+   * Create computed instances only for 'ref' (not for 'type')
+   * @param {Object} entityConfig Entity config: props, metadata
+   * @param {*} value Value of this property
+   * @returns {*} Value (for primitives) or instance of type (for entities)
+   */
+  _createByType(entityConfig, value) {
+    // value = { name: 'bar', lname: 'foo', person: { age: 123 } }
+    // 1. create 2. update props (with effects)
+    const needEntity = new this.constructor(entityConfig);
+    needEntity.update(value);
+    return needEntity;
   }
 
   /**
    * For example, create Instance from array
-   * 'ranges': [{start: 123, end: 234}, {...}, ...]
+   * 'events': [{start: 123, end: 234}, {...}, ...]
    * Must return Array of instances for Arrays
    * @param {String} propName Like 'ranges', 'name'
    * @param {Array<Object>|String|Number|*} value Any value for this property
@@ -121,24 +129,58 @@ class Computer {
    */
   _createInstanceFromValue(propName, value) {
     if (value === null) { return null; }
-    const settingType = this.__config[propName].type;
-    const PropConfigType = Array.isArray(settingType) ?
-          settingType[0] : settingType;
+
+    const propSetting = this.__settings[propName];
+
+    // TODO:
+    const settingType = propSetting.type;
+
+    // referenced entity, like event.place
+    const entitySettings = propSetting.refSettings;
+
+    // console.log('refEntity', refEntity && Object.keys(refEntity));
 
     const that = this;
-    if (Array.isArray(value)) {
-      return value.map(function(itemValue) {
-        return that._createByType(PropConfigType, itemValue);
-      });
+
+    // if (Array.isArray(value)) {
+    if (settingType === 'ItemList') {
+      if (!entitySettings) {
+        throw new Error('required_ref_for_item_list: ' + propName + ' ' + JSON.stringify(value));
+      }
+
+      if (Array.isArray(value) === true) {
+        return value.map(function(itemValue) {
+          return that._createByType(entitySettings, itemValue);
+        });
+        // throw new Error('required_array: ' + propName + ' ' + JSON.stringify(value));
+      }
+
+      // create for insertItem method
+      return this._createByType(entitySettings, value);
+    } else if (settingType === 'Item') {
+      if (!entitySettings) { throw new Error('required_ref_for_item: ' + propName); }
+      return this._createByType(entitySettings, value);
     }
 
-    return this._createByType(PropConfigType, value);
+    // TODO: hack for async properties
+    if (this.__settings[propName].calculateAsync) {
+      return value;
+    }
+
+    // verify type of value
+    // Item and ItemList is already verified during entity.update
+    // all types must be verified on ViewSide:
+    //  on ModelSide just checking with exceptions
+    // if (types[settingType].isValid(value) === false) {
+    //   throw new Error('type_mismatch: ' + propName + ': ' + value + ': ' + settingType);
+    // }
+
+    return value;
   }
 
   _set(key, value) {
-    var keyConfig = this.__config[key];
-    if (keyConfig.calculate &&
-       !keyConfig.calculateAsync) {
+    const propSetting = this.__settings[key];
+    if (propSetting.calculate && !propSetting.calculateAsync) {
       // at this moment async properties updated from outside (state)
       throw new Error('only_writable_properties_allowed: ' + key);
     }
@@ -152,9 +194,12 @@ class Computer {
    *
    * Alternative: Object.defineProperty(this, key, { value: value });
    *   does not work in PhantomJS: https://github.com/ariya/phantomjs/issues/11856
+   * @param {String} key Property name
+   * @param {*} value New property value
+   * @returns {undefined} Result of setting
    */
   _setComputed(key, value) {
-    if (!this.__config[key].calculate) {
+    if (!this.__settings[key].calculate) {
       throw new Error('only_computed_properties_allowed:' + key);
     }
     this[key] = value;
@@ -181,8 +226,8 @@ class Computer {
     return (
       // Strict equality check for primitives
       (old !== value &&
-       // This ensures old:NaN, value:NaN always returns false
-       (old === old || value === value)) // eslint-disable-line no-self-compare
+        // This ensures old:NaN, value:NaN always returns false
+        (old === old || value === value)) // eslint-disable-line no-self-compare
     );
   }
 
@@ -198,6 +243,7 @@ class Computer {
 
   /**
    * @param {String} propertyName Like 'ranges', 'name', etc.
+   * @param {*} value To update
    * @returns {Boolean} Whether the property updated
    */
   _updatePropertyIfNeeded(propertyName, value) {
@@ -223,59 +269,64 @@ class Computer {
     return list;
   }
 
-  // if an object (not a property)
-  // ['student', 'name'] = this.student
-  // ['people', '0', 'name'] = this.people
-    // .join('.')
-  _updatePathObject(objectName, nextParts, value) {
-    const mainObject = this[objectName];
+  /**
+   * Find the entity (one or item from array) and fire associatedCommand
+   *   and run propEffects for middle entities
+   * If an object (not a property)
+   * ['student', 'name'] = this.student
+   * ['people', '0', 'name'] = this.people
+   * @param {String} entityName Like 'student'
+   * @param {Array<String>} nextLevels Like ['5', 'grades']
+   * @param {*} value Value to update | insert | remove
+   * @param {String} associatedCommand Update|Insert|Remove
+   * @returns {Object} Scope of changes
+   */
+  _iterateLevels(entityName, nextLevels, value, associatedCommand) {
+    const mainEntity = this[entityName];
 
     // if no people.0
-    if (!mainObject) {
-      throw new Error('no_such_property_to_set: ' + objectName);
+    if (!mainEntity) {
+      throw new Error('no_such_property_to_set: ' + entityName);
     }
 
     // this.student._updatePath
     // this.people - Array (no such method)
-    var scopeOfInternalChanges;
-
+    var needEntity;
+    var needLevels;
     // this.people - Array (no inner methods)
     // nextPropertyPath = '0.name'
-    if (Array.isArray(mainObject)) {
+    // if 'students' or 'people'
+    if (Array.isArray(mainEntity)) {
       // 2 = of [2, name] of people.2.name
       // 4 = of [4] of people.4
       // usa = of [usa, area] of countries.usa.area
-      var elemPrimaryKey = nextParts[0];
+      const elemPrimaryKey = nextLevels[0];
       // search by index of an array
       // it can be replaced with search by id of item
-      var mainItem = mainObject.filter(function(elem) {
-        // country['id'] === 'usa'
-        return (elem[PRIMARY_KEY] + '') === elemPrimaryKey;
-      })[0];
+      const mainItem = findItemByPrimaryKey(mainEntity, elemPrimaryKey);
 
-      // Looking by array index
-      // var mainItem = mainObject[itemPart];
       if (!mainItem) {
         // console.log('mainItem', elemPrimaryKey, JSON.stringify(mainObject));
-        throw new Error('cannot_update_nonexistent_item: ' + objectName + '.' + elemPrimaryKey);
+        throw new Error('cannot_update_nonexistent_item: ' + entityName + '.' + elemPrimaryKey);
       }
-      // 'name' of [2,name] of people.2.name
-      // '' of [4] of people.4
-      var itemNextPropertyPath = nextParts.slice(1).join('.');
-      if (!itemNextPropertyPath) {
-        throw new Error('update_is_not_supported_for_path: ' + objectName + '.' + elemPrimaryKey + ' use removeItem + insertItem instead');
-      }
-      scopeOfInternalChanges = mainItem._updatePath(itemNextPropertyPath, value);
+
+      needEntity = mainItem;
+      needLevels = nextLevels.slice(1);
     } else {
-      scopeOfInternalChanges = mainObject._updatePath(nextParts.join('.'), value);
+      needEntity = mainEntity;
+      needLevels = nextLevels;
     }
 
-    if (!scopeOfInternalChanges) {
-      return null;
+    if (needLevels.length < 1) {
+      throw new Error('update_is_not_supported_for_path: ' + entityName);
     }
 
-    var scopeOfComputedPropNames = {};
-    scopeOfComputedPropNames[objectName] = this._runPropEffects(objectName);
+    const scopeOfInternalChanges = needEntity[associatedCommand](levelsToPath(needLevels), value);
+
+    if (!scopeOfInternalChanges) { return null; }
+
+    const scopeOfComputedPropNames = {};
+    scopeOfComputedPropNames[entityName] = this._runPropEffects(entityName);
     return scopeOfComputedPropNames;
   }
 
@@ -288,6 +339,7 @@ class Computer {
    *   - 'people:3'
    *   - 'countries:usa.area'
    * @param {*} value Any value
+   * @returns {Object} Scope of changes
    */
   _updatePath(propertyPath, value) {
     // levels of an object
@@ -299,35 +351,30 @@ class Computer {
     // - countries
     // - usa - 2nd level
     // - area - 3rd level
-    var levels = propertyPath.split('.');
+    const levels = pathToLevels(propertyPath);
 
     // main = 'student': ['student', 'name'] (object)
     // main = 'lastName': ['lastName'] (property of an object)
     // main = 'people' : ['people', '0', 'name'] (object = array)
     // main = '0' : ['0', 'name'] (object = item of an array)
-    var mainLevel = levels[0];
+    const mainLevel = levels[0];
     // console.log('_updatePath', propertyPath, propertyName);
     if (!mainLevel) {
       throw new Error('property_path_invalid: ' + propertyPath);
+    }
+
+    if (levels.length > 1) {
+      return this._iterateLevels(mainLevel, levels.slice(1), value, '_updatePath');
     }
 
     // if a property (not an object): name, lastName, age
     // or update a full object:
     // - 'student': { id:123, name: 'asdf'}
     // - 'countries.usa': { area: 345 }
-    if (levels.length === 1) {
-      var isChanged = this._updatePropertyIfNeeded(mainLevel, value);
-
-      if (isChanged) {
-        return this._runBatchedEffects([mainLevel]);
-      }
-
-      return null;
-    }
-
-    var nextLevels = levels.slice(1);
-    // object
-    return this._updatePathObject(mainLevel, nextLevels, value);
+    // if (levels.length === 1) {
+    const isChanged = this._updatePropertyIfNeeded(mainLevel, value);
+    if (isChanged) { return this._runBatchedEffects([mainLevel]); }
+    return null;
   }
 
   update(paths) {
@@ -353,6 +400,8 @@ class Computer {
 
   /**
    * Run effects for few properties
+   * @param {String[]} changedPropNames Like ['name', 'lastName']
+   * @returns {Object} Scope of computed property names
    */
   _runBatchedEffects(changedPropNames) {
     if (changedPropNames.length === 0) {
@@ -379,11 +428,11 @@ class Computer {
   _updateProperties(props) {
     var callback = function(propertyName) {
       return this._updatePropertyIfNeeded(propertyName,
-                                          props[propertyName]);
+        props[propertyName]);
     };
 
     var changedPropNames = Object.keys(props)
-          .filter(callback.bind(this));
+      .filter(callback.bind(this));
 
     return this._runBatchedEffects(changedPropNames);
   }
@@ -391,59 +440,104 @@ class Computer {
   /**
    * Insert to an array
    * - insertItem('tasks',  {id: 2, name: 'asdf'})
+   * @param {String} propertyPath Like 'groups', 'students',
+   *                 'groups.5.members', 'student.grades'
+   * @param {Object} item Entity data: { id: 1, name: 'asdf' }
+   * @returns {undefined}
    */
-  insertItem(propName, item) {
-    // TODO: use PrimaryKey config instead 'id'
+  insertItem(propertyPath, item) {
     // TODO: verify id unique through all table
     // TODO: insert, using sorting by id
     if (item[PRIMARY_KEY] === null || item[PRIMARY_KEY] === undefined) {
-      throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propName);
+      throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propertyPath);
     }
 
-    var typeArray = this.__config[propName].type;
-    if (Array.isArray(typeArray) === false) {
-      throw new Error('insert_only_for_arrays:' + propName);
+    // duplication of _updatePath
+    const levels = pathToLevels(propertyPath);
+    const mainLevel = levels[0];
+    if (!mainLevel) {
+      throw new Error('property_path_invalid: ' + propertyPath);
     }
 
-    var currentList = this[propName];
+    if (levels.length > 1) {
+      return this._iterateLevels(mainLevel, levels.slice(1), item, 'insertItem');
+      // return null;
+    }
+
+    const propertyName = propertyPath; // 1-level
+
+    if (!this.__settings[propertyName]) {
+      throw new Error('no_such_property_to_insert: ' + propertyName);
+    }
+
+    const propType = this.__settings[propertyName].type;
+
+    if (propType !== 'ItemList') {
+      throw new Error('required_ItemList_type_to_insert:' + propertyName);
+    }
+
+    var currentList = this[propertyName];
 
     if (Array.isArray(currentList) === false) {
-      throw new Error('insert_only_to_arrays:' + propName);
+      throw new Error('required_array_to_insert:' + propertyName);
     }
 
     var existingIndex = findIndexByPrimaryKey(currentList, item[PRIMARY_KEY]);
 
-    if (existingIndex >= 0) { return null; }
+    if (existingIndex >= 0) {
+      console.log('already_exist: ' + propertyName);
+      return null;
+    }
 
-    var itemInstance = this._createInstanceFromValue(propName, item);
+    // ('students', {id: 1, name: 'Jane'})
+    var itemInstance = this._createInstanceFromValue(propertyName, item);
 
+    // append new item to the store
     currentList.push(itemInstance);
 
     var scopeOfPropNames = {};
-    scopeOfPropNames[propName] = this._runPropEffects(propName);
+    scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
     return scopeOfPropNames;
   }
 
-  removeItem(propName, primaryKey) {
-    var typeArray = this.__config[propName].type;
-    if (Array.isArray(typeArray) === false) {
-      throw new Error('remove_only_for_arrays');
+  removeItem(propertyPath, primaryKeyValue) {
+    const levels = pathToLevels(propertyPath);
+
+    if (levels.length > 1) {
+      return this._iterateLevels(levels[0], levels.slice(1), primaryKeyValue, 'removeItem');
+      // return null;
     }
 
-    var currentList = this[propName];
+    const propertyName = propertyPath;
+
+    if (!this.__settings[propertyName]) {
+      throw new Error('no_such_property_to_remove: ' + propertyName);
+    }
+
+    const propType = this.__settings[propertyName].type;
+    // if (Array.isArray(typeArray) === false) {
+    if (propType !== 'ItemList') {
+      throw new Error('required_ItemList_to_remove: ' + propertyName);
+    }
+
+    var currentList = this[propertyName];
 
     if (Array.isArray(currentList) === false) {
-      throw new Error('remove_only_from_arrays:' + propName);
+      throw new Error('required_array_value_to_remove:' + propertyName);
     }
 
-    var existingIndex = findIndexByPrimaryKey(currentList, primaryKey);
+    var existingIndex = findIndexByPrimaryKey(currentList, primaryKeyValue);
 
-    if (existingIndex < 0) { return null; }
+    if (existingIndex < 0) {
+      console.log('record_not_found: ', primaryKeyValue, currentList);
+      return null;
+    }
 
+    // remove item from the store
     currentList.splice(existingIndex, 1);
 
     var scopeOfPropNames = {};
-    scopeOfPropNames[propName] = this._runPropEffects(propName);
+    scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
     return scopeOfPropNames;
   }
 }

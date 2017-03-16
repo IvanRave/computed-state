@@ -9,23 +9,23 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 
 var Listener = require('./listener');
 var Computer = require('./computer');
+var Setting = require('./setting');
 
-var toPlainChangedKeys = function (scope, target) {
+var toPlainChangedPaths = function (scope, target) {
   if (!scope) {
-    throw new Error('toPlainChangedKeys_scope_required');
+    throw new Error('toPlainChangedPaths_scope_required');
   }
 
   if (Array.isArray(scope) === true) {
     scope.forEach(function (item) {
-      toPlainChangedKeys(item, target);
+      toPlainChangedPaths(item, target);
     });
   } else {
-    // if Object
     Object.keys(scope).forEach(function (key) {
       if (target.indexOf(key) < 0) {
         target.push(key);
       }
-      toPlainChangedKeys(scope[key], target);
+      toPlainChangedPaths(scope[key], target);
     });
   }
 };
@@ -41,7 +41,7 @@ var getWritableProperties = function (obj) {
   var result = {};
 
   Object.keys(obj).forEach(function (key) {
-    if (!obj.__config[key].calculate) {
+    if (!obj.__settings[key].calculate) {
       var value = obj[key];
       if (value !== null && typeof value === 'object') {
         // objects
@@ -72,9 +72,9 @@ var getAsyncPaths = function (obj) {
   var result = {};
 
   Object.keys(obj).forEach(function (key) {
-    var keyConfig = obj.__config[key];
-    var calculateAsync = keyConfig.calculateAsync;
-    var watchedKeys = keyConfig.watchedKeys;
+    var propSetting = obj.__settings[key];
+    var calculateAsync = propSetting.calculateAsync;
+    var watchedKeys = propSetting.watchedKeys;
 
     // if async exists
     if (!calculateAsync || !watchedKeys) {
@@ -97,19 +97,52 @@ var getAsyncPaths = function (obj) {
   return result;
 };
 
+/**
+ * @param {Function} callback Executed when keys are changed
+ * @param {String[]} watchedKeys List of property keys
+ * @todo watchedPaths instead keys
+ * @param {Listener[]} anyListeners List of async or usual listeners
+ * @returns {Function} unsubscribe - remove subscription
+ */
+var subscribeAny = function (callback, watchedKeys, anyListeners) {
+  var listener = new Listener(callback, watchedKeys);
+  anyListeners.push(listener);
+  return function () {
+    var index = anyListeners.indexOf(listener);
+    anyListeners.splice(index, 1);
+  };
+};
+
+/**
+ * Build settings from config
+ * config is more readable; settings - usable
+ * @param {Object} config { name: {type:'Text'}, ... }
+ * @returns {Object} Scope of instances of settings
+ */
+var buildSettings = function (config) {
+  var settings = {};
+  Object.keys(config).forEach(function (propName) {
+    settings[propName] = new Setting(propName, config[propName]);
+  });
+
+  return settings;
+};
+
 var ComputedState = function () {
   function ComputedState(rootConfig) {
     _classCallCheck(this, ComputedState);
 
-    this.state = new Computer(rootConfig);
-    this.listeners = [];
-    this.asyncListeners = [];
+    var rootSettings = buildSettings(rootConfig);
+
+    this._rootEntity = new Computer(rootSettings);
+    this._listeners = [];
+    this._asyncListeners = [];
 
     /**
      * Timeouts, XHR requests and other async instances
      * To cancel it before new invocation
      */
-    this.asyncCancels = {};
+    this._asyncCancels = {};
   }
 
   /** Convert changed keys; notify listeners; run async handlers */
@@ -123,17 +156,17 @@ var ComputedState = function () {
       }
       // console.log('scopeOfChangedKeys', JSON.stringify(scopeOfChangedKeys));
       // TODO: convert to changed paths instead keys (or add to output)
-      var allChangedKeys = [];
-      toPlainChangedKeys(scopeOfChangedKeys, allChangedKeys);
-      this.ready(allChangedKeys);
+      var allChangedPaths = [];
+      toPlainChangedPaths(scopeOfChangedKeys, allChangedPaths);
+      this.ready(allChangedPaths);
 
       // remove skipped items
-      var neededChangedKeys = allChangedKeys.filter(function (key) {
+      var neededChangedPaths = allChangedPaths.filter(function (key) {
         return key !== skippedPropertyKey;
       });
 
-      if (neededChangedKeys.length > 0) {
-        this.handleAsyncProps(neededChangedKeys);
+      if (neededChangedPaths.length > 0) {
+        this.handleAsyncProps(neededChangedPaths);
       }
     }
 
@@ -146,7 +179,7 @@ var ComputedState = function () {
   }, {
     key: 'handleAsyncProps',
     value: function handleAsyncProps(allChangedPaths) {
-      var asyncPaths = getAsyncPaths(this.state);
+      var asyncPaths = getAsyncPaths(this._rootEntity);
 
       var that = this;
 
@@ -207,24 +240,26 @@ var ComputedState = function () {
         var allArgs = asyncArgs.concat([resolve, reject]);
 
         // clean prev timeout
-        var prevCancelAsync = that.asyncCancels[propertyPath];
+        var prevCancelAsync = that._asyncCancels[propertyPath];
         if (prevCancelAsync) {
           prevCancelAsync();
-          delete that.asyncCancels[propertyPath];
+          delete that._asyncCancels[propertyPath];
         }
 
         // run computedAsync function
         var cancelAsync = asyncFunction.apply(null, allArgs);
-        that.asyncCancels[propertyPath] = cancelAsync;
+        that._asyncCancels[propertyPath] = cancelAsync;
       });
     }
 
     /** Copy an return a current state */
 
   }, {
-    key: 'getState',
-    value: function getState() {
-      return JSON.parse(JSON.stringify(this.state));
+    key: 'getEntity',
+    value: function getEntity() {
+      return this._rootEntity;
+      // TODO: or copy
+      // return JSON.parse(JSON.stringify(this._rootEntity));
     }
 
     /**
@@ -233,16 +268,16 @@ var ComputedState = function () {
      */
 
   }, {
-    key: 'getWritableState',
-    value: function getWritableState() {
-      var writableState = getWritableProperties(this.state);
+    key: 'getWritableEntity',
+    value: function getWritableEntity() {
+      var writableEntity = getWritableProperties(this._rootEntity);
       // console.log('w', writableState);
-      return writableState;
+      return writableEntity;
     }
   }, {
     key: 'update',
-    value: function update(props) {
-      this.operate(this.state.update(props));
+    value: function update(paths) {
+      this.operate(this._rootEntity.update(paths));
     }
 
     /** Update all properties, but skip re-async for async props */
@@ -252,17 +287,17 @@ var ComputedState = function () {
     value: function _updateAsyncProperty(propertyPath, propertyValue) {
       var upd = {};
       upd[propertyPath] = propertyValue;
-      this.operate(this.state.update(upd), propertyPath);
+      this.operate(this._rootEntity.update(upd), propertyPath);
     }
   }, {
     key: 'insertItem',
-    value: function insertItem(propName, item) {
-      this.operate(this.state.insertItem(propName, item));
+    value: function insertItem(propertyPath, item) {
+      this.operate(this._rootEntity.insertItem(propertyPath, item));
     }
   }, {
     key: 'removeItem',
-    value: function removeItem(propName, id) {
-      this.operate(this.state.removeItem(propName, id));
+    value: function removeItem(propertyPath, id) {
+      this.operate(this._rootEntity.removeItem(propertyPath, id));
     }
   }, {
     key: 'pingState',
@@ -272,12 +307,12 @@ var ComputedState = function () {
   }, {
     key: 'subscribe',
     value: function subscribe(callback, watchedKeys) {
-      this.listeners.push(new Listener(callback, watchedKeys));
+      return subscribeAny(callback, watchedKeys, this._listeners);
     }
   }, {
     key: 'subscribeAsync',
     value: function subscribeAsync(callback, watchedKeys) {
-      this.asyncListeners.push(new Listener(callback, watchedKeys));
+      return subscribeAny(callback, watchedKeys, this._asyncListeners);
     }
 
     /** When all sync operations are finished */
@@ -285,10 +320,10 @@ var ComputedState = function () {
   }, {
     key: 'ready',
     value: function ready(changedKeys) {
-      var state = this.getState();
-      var writableState = this.getWritableState();
+      var state = this.getEntity();
+      var writableState = this.getWritableEntity();
 
-      this.listeners.forEach(function (listener) {
+      this._listeners.forEach(function (listener) {
         listener.notify(changedKeys, state, writableState);
       });
     }
@@ -298,10 +333,10 @@ var ComputedState = function () {
   }, {
     key: 'readyAsync',
     value: function readyAsync(changedAsyncKeys) {
-      var state = this.getState();
-      var writableState = this.getWritableState();
+      var state = this.getEntity();
+      var writableState = this.getWritableEntity();
 
-      this.asyncListeners.forEach(function (listener) {
+      this._asyncListeners.forEach(function (listener) {
         listener.notify(changedAsyncKeys, state, writableState);
       });
     }
@@ -312,7 +347,7 @@ var ComputedState = function () {
 
 module.exports = ComputedState;
 
-},{"./computer":2,"./listener":4}],2:[function(require,module,exports){
+},{"./computer":2,"./listener":4,"./setting":5}],2:[function(require,module,exports){
 /** @module */
 
 'use strict';
@@ -322,7 +357,6 @@ var _createClass = function () { function defineProperties(target, props) { for 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 var Effect = require('./effect');
-var Setting = require('./setting');
 
 var PRIMARY_KEY = 'id';
 
@@ -335,26 +369,38 @@ var findIndexByPrimaryKey = function (list, primaryKey) {
   return -1;
 };
 
+var findItemByPrimaryKey = function (list, primaryKeyString) {
+  return list.filter(function (elem) {
+    // country['id'] === 'usa'
+    // 'members.5.name' -  typeof '5' === 'string'
+    return elem[PRIMARY_KEY] + '' === primaryKeyString;
+  })[0];
+};
+
 var hasOwnProperty = function (inst, propName) {
   return {}.hasOwnProperty.call(inst, propName);
 };
 
-var extendConfig = function (config) {
-  var result = {};
-  Object.keys(config).forEach(function (propName) {
-    result[propName] = new Setting(propName, config[propName]);
-  });
-  return result;
+var pathToLevels = function (propertyPath) {
+  return propertyPath.split('.');
+};
+
+var levelsToPath = function (levels) {
+  return levels.join('.');
 };
 
 /** A class to create calculated objects from specific configuration */
 
 var Computer = function () {
   /**
-   * @param {Object} config Common config for all instances
+   * @param {Object} settings Common settings for all instances
    */
-  function Computer(config, initialProps) {
+  function Computer(settings) {
     _classCallCheck(this, Computer);
+
+    if (!settings) {
+      throw new Error('settings_required');
+    }
 
     Object.defineProperty(this, '__effects', {
       value: [],
@@ -363,41 +409,39 @@ var Computer = function () {
       configurable: false
     });
 
-    Object.defineProperty(this, '__config', {
-      value: extendConfig(config),
+    // save settings for future using
+    Object.defineProperty(this, '__settings', {
+      value: settings,
       writable: false,
       enumerable: false,
       configurable: false
     });
 
-    Object.keys(this.__config).forEach(this._createProperty.bind(this));
-
-    if (initialProps) {
-      this.update(initialProps);
-    }
+    // create properties from settings
+    Object.keys(this.__settings).forEach(this._createProperty.bind(this));
   }
 
   /**
-   * Default values for properties:
-   * - for primitives and nested objects: null
-   * - for arrays: [] (can not be null)
+   * Default value for properties: null
+   * @param {String} propName Property name, like 'birthDate'
+   * @returns {Object} Result of creation
    */
 
 
   _createClass(Computer, [{
     key: '_createProperty',
     value: function _createProperty(propName) {
-      var propSettings = this.__config[propName];
+      var propertySetting = this.__settings[propName];
 
       Object.defineProperty(this, propName, {
-        value: Array.isArray(propSettings.type) ? [] : null,
+        value: propertySetting.type === 'ItemList' ? [] : null,
         writable: true,
         enumerable: true,
         configurable: false
       });
 
-      if (propSettings.calculate) {
-        this._attachComputedProps(propName, propSettings.watchedKeys, propSettings.calculate);
+      if (propertySetting.calculate) {
+        this._attachComputedProps(propName, propertySetting.watchedKeys, propertySetting.calculate);
       }
     }
   }, {
@@ -408,7 +452,11 @@ var Computer = function () {
       this.__effects.push(new Effect(this, propName, watchedKeys, calculate));
     }
 
-    /** Wached properties must be declared before computed properties */
+    /**
+     * Wached properties must be declared before computed properties
+     * @param {String} watchedKey One of ['firstName', 'lastName']
+     * @returns {*} Result of verification
+     */
 
   }, {
     key: '_verifyWatchedKey',
@@ -417,28 +465,27 @@ var Computer = function () {
         throw new Error('required_dependent_property: ' + watchedKey);
       }
     }
+
+    /**
+     * Create computed instances only for 'ref' (not for 'type')
+     * @param {Object} entityConfig Entity config: props, metadata
+     * @param {*} value Value of this property
+     * @returns {*} Value (for primitives) or instance of type (for entities)
+     */
+
   }, {
     key: '_createByType',
-    value: function _createByType(PropConfigType, value) {
-      // if String, Number, Boolean - just return the value
-      if (value.constructor === PropConfigType) {
-        return value;
-      }
-
-      // if own config type, like 'range', 'phone'
-      //   return a computed instance of own type
-      if (typeof PropConfigType === 'object') {
-        // console.log('object', this.constructor);
-        // console.log('new object, based', value);
-        return new this.constructor(PropConfigType, value);
-      }
-
-      throw new TypeError('required_type: ' + PropConfigType + ' for value: ' + value);
+    value: function _createByType(entityConfig, value) {
+      // value = { name: 'bar', lname: 'foo', person: { age: 123 } }
+      // 1. create 2. update props (with effects)
+      var needEntity = new this.constructor(entityConfig);
+      needEntity.update(value);
+      return needEntity;
     }
 
     /**
      * For example, create Instance from array
-     * 'ranges': [{start: 123, end: 234}, {...}, ...]
+     * 'events': [{start: 123, end: 234}, {...}, ...]
      * Must return Array of instances for Arrays
      * @param {String} propName Like 'ranges', 'name'
      * @param {Array<Object>|String|Number|*} value Any value for this property
@@ -451,23 +498,61 @@ var Computer = function () {
       if (value === null) {
         return null;
       }
-      var settingType = this.__config[propName].type;
-      var PropConfigType = Array.isArray(settingType) ? settingType[0] : settingType;
+
+      var propSetting = this.__settings[propName];
+
+      // TODO:
+      var settingType = propSetting.type;
+
+      // referenced entity, like event.place
+      var entitySettings = propSetting.refSettings;
+
+      // console.log('refEntity', refEntity && Object.keys(refEntity));
 
       var that = this;
-      if (Array.isArray(value)) {
-        return value.map(function (itemValue) {
-          return that._createByType(PropConfigType, itemValue);
-        });
+
+      // if (Array.isArray(value)) {
+      if (settingType === 'ItemList') {
+        if (!entitySettings) {
+          throw new Error('required_ref_for_item_list: ' + propName + ' ' + JSON.stringify(value));
+        }
+
+        if (Array.isArray(value) === true) {
+          return value.map(function (itemValue) {
+            return that._createByType(entitySettings, itemValue);
+          });
+          // throw new Error('required_array: ' + propName + ' ' + JSON.stringify(value));
+        }
+
+        // create for insertItem method
+        return this._createByType(entitySettings, value);
+      } else if (settingType === 'Item') {
+        if (!entitySettings) {
+          throw new Error('required_ref_for_item: ' + propName);
+        }
+        return this._createByType(entitySettings, value);
       }
 
-      return this._createByType(PropConfigType, value);
+      // TODO: hack for async properties
+      if (this.__settings[propName].calculateAsync) {
+        return value;
+      }
+
+      // verify type of value
+      // Item and ItemList is already verified during entity.update
+      // all types must be verified on ViewSide:
+      //  on ModelSide just checking with exceptions
+      // if (types[settingType].isValid(value) === false) {
+      //   throw new Error('type_mismatch: ' + propName + ': ' + value + ': ' + settingType);
+      // }
+
+      return value;
     }
   }, {
     key: '_set',
     value: function _set(key, value) {
-      var keyConfig = this.__config[key];
-      if (keyConfig.calculate && !keyConfig.calculateAsync) {
+      var propSetting = this.__settings[key];
+      if (propSetting.calculate && !propSetting.calculateAsync) {
         // at this moment async properties updated from outside (state)
         throw new Error('only_writable_properties_allowed: ' + key);
       }
@@ -481,12 +566,15 @@ var Computer = function () {
      *
      * Alternative: Object.defineProperty(this, key, { value: value });
      *   does not work in PhantomJS: https://github.com/ariya/phantomjs/issues/11856
+     * @param {String} key Property name
+     * @param {*} value New property value
+     * @returns {undefined} Result of setting
      */
 
   }, {
     key: '_setComputed',
     value: function _setComputed(key, value) {
-      if (!this.__config[key].calculate) {
+      if (!this.__settings[key].calculate) {
         throw new Error('only_computed_properties_allowed:' + key);
       }
       this[key] = value;
@@ -534,6 +622,7 @@ var Computer = function () {
 
     /**
      * @param {String} propertyName Like 'ranges', 'name', etc.
+     * @param {*} value To update
      * @returns {Boolean} Whether the property updated
      */
 
@@ -563,62 +652,69 @@ var Computer = function () {
       return list;
     }
 
-    // if an object (not a property)
-    // ['student', 'name'] = this.student
-    // ['people', '0', 'name'] = this.people
-    // .join('.')
+    /**
+     * Find the entity (one or item from array) and fire associatedCommand
+     *   and run propEffects for middle entities
+     * If an object (not a property)
+     * ['student', 'name'] = this.student
+     * ['people', '0', 'name'] = this.people
+     * @param {String} entityName Like 'student'
+     * @param {Array<String>} nextLevels Like ['5', 'grades']
+     * @param {*} value Value to update | insert | remove
+     * @param {String} associatedCommand Update|Insert|Remove
+     * @returns {Object} Scope of changes
+     */
 
   }, {
-    key: '_updatePathObject',
-    value: function _updatePathObject(objectName, nextParts, value) {
-      var mainObject = this[objectName];
+    key: '_iterateLevels',
+    value: function _iterateLevels(entityName, nextLevels, value, associatedCommand) {
+      var mainEntity = this[entityName];
 
       // if no people.0
-      if (!mainObject) {
-        throw new Error('no_such_property_to_set: ' + objectName);
+      if (!mainEntity) {
+        throw new Error('no_such_property_to_set: ' + entityName);
       }
 
       // this.student._updatePath
       // this.people - Array (no such method)
-      var scopeOfInternalChanges;
-
+      var needEntity;
+      var needLevels;
       // this.people - Array (no inner methods)
       // nextPropertyPath = '0.name'
-      if (Array.isArray(mainObject)) {
+      // if 'students' or 'people'
+      if (Array.isArray(mainEntity)) {
         // 2 = of [2, name] of people.2.name
         // 4 = of [4] of people.4
         // usa = of [usa, area] of countries.usa.area
-        var elemPrimaryKey = nextParts[0];
+        var elemPrimaryKey = nextLevels[0];
         // search by index of an array
         // it can be replaced with search by id of item
-        var mainItem = mainObject.filter(function (elem) {
-          // country['id'] === 'usa'
-          return elem[PRIMARY_KEY] + '' === elemPrimaryKey;
-        })[0];
+        var mainItem = findItemByPrimaryKey(mainEntity, elemPrimaryKey);
 
-        // Looking by array index
-        // var mainItem = mainObject[itemPart];
         if (!mainItem) {
           // console.log('mainItem', elemPrimaryKey, JSON.stringify(mainObject));
-          throw new Error('cannot_update_nonexistent_item: ' + objectName + '.' + elemPrimaryKey);
+          throw new Error('cannot_update_nonexistent_item: ' + entityName + '.' + elemPrimaryKey);
         }
-        // 'name' of [2,name] of people.2.name
-        // '' of [4] of people.4
-        var itemNextPropertyPath = nextParts.slice(1).join('.');
-        if (!itemNextPropertyPath) {
-          throw new Error('update_is_not_supported_for_path: ' + objectName + '.' + elemPrimaryKey + ' use removeItem + insertItem instead');
-        }
-        scopeOfInternalChanges = mainItem._updatePath(itemNextPropertyPath, value);
+
+        needEntity = mainItem;
+        needLevels = nextLevels.slice(1);
       } else {
-        scopeOfInternalChanges = mainObject._updatePath(nextParts.join('.'), value);
+        needEntity = mainEntity;
+        needLevels = nextLevels;
       }
+
+      if (needLevels.length < 1) {
+        throw new Error('update_is_not_supported_for_path: ' + entityName);
+      }
+
+      var scopeOfInternalChanges = needEntity[associatedCommand](levelsToPath(needLevels), value);
 
       if (!scopeOfInternalChanges) {
         return null;
       }
 
       var scopeOfComputedPropNames = {};
-      scopeOfComputedPropNames[objectName] = this._runPropEffects(objectName);
+      scopeOfComputedPropNames[entityName] = this._runPropEffects(entityName);
       return scopeOfComputedPropNames;
     }
 
@@ -631,6 +727,7 @@ var Computer = function () {
      *   - 'people:3'
      *   - 'countries:usa.area'
      * @param {*} value Any value
+     * @returns {Object} Scope of changes
      */
 
   }, {
@@ -645,7 +742,7 @@ var Computer = function () {
       // - countries
       // - usa - 2nd level
       // - area - 3rd level
-      var levels = propertyPath.split('.');
+      var levels = pathToLevels(propertyPath);
 
       // main = 'student': ['student', 'name'] (object)
       // main = 'lastName': ['lastName'] (property of an object)
@@ -657,23 +754,20 @@ var Computer = function () {
         throw new Error('property_path_invalid: ' + propertyPath);
       }
 
+      if (levels.length > 1) {
+        return this._iterateLevels(mainLevel, levels.slice(1), value, '_updatePath');
+      }
+
       // if a property (not an object): name, lastName, age
       // or update a full object:
       // - 'student': { id:123, name: 'asdf'}
       // - 'countries.usa': { area: 345 }
-      if (levels.length === 1) {
-        var isChanged = this._updatePropertyIfNeeded(mainLevel, value);
-
-        if (isChanged) {
-          return this._runBatchedEffects([mainLevel]);
-        }
-
-        return null;
+      // if (levels.length === 1) {
+      var isChanged = this._updatePropertyIfNeeded(mainLevel, value);
+      if (isChanged) {
+        return this._runBatchedEffects([mainLevel]);
       }
-
-      var nextLevels = levels.slice(1);
-      // object
-      return this._updatePathObject(mainLevel, nextLevels, value);
+      return null;
     }
   }, {
     key: 'update',
@@ -700,6 +794,8 @@ var Computer = function () {
 
     /**
      * Run effects for few properties
+     * @param {String[]} changedPropNames Like ['name', 'lastName']
+     * @returns {Object} Scope of computed property names
      */
 
   }, {
@@ -742,67 +838,108 @@ var Computer = function () {
     /**
      * Insert to an array
      * - insertItem('tasks',  {id: 2, name: 'asdf'})
+     * @param {String} propertyPath Like 'groups', 'students',
+     *                 'groups.5.members', 'student.grades'
+     * @param {Object} item Entity data: { id: 1, name: 'asdf' }
+     * @returns {undefined}
      */
 
   }, {
     key: 'insertItem',
-    value: function insertItem(propName, item) {
-      // TODO: use PrimaryKey config instead 'id'
+    value: function insertItem(propertyPath, item) {
       // TODO: verify id unique through all table
       // TODO: insert, using sorting by id
       if (item[PRIMARY_KEY] === null || item[PRIMARY_KEY] === undefined) {
-        throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propName);
+        throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propertyPath);
       }
 
-      var typeArray = this.__config[propName].type;
-      if (Array.isArray(typeArray) === false) {
-        throw new Error('insert_only_for_arrays:' + propName);
+      // duplication of _updatePath
+      var levels = pathToLevels(propertyPath);
+      var mainLevel = levels[0];
+      if (!mainLevel) {
+        throw new Error('property_path_invalid: ' + propertyPath);
       }
 
-      var currentList = this[propName];
+      if (levels.length > 1) {
+        return this._iterateLevels(mainLevel, levels.slice(1), item, 'insertItem');
+        // return null;
+      }
+
+      var propertyName = propertyPath; // 1-level
+
+      if (!this.__settings[propertyName]) {
+        throw new Error('no_such_property_to_insert: ' + propertyName);
+      }
+
+      var propType = this.__settings[propertyName].type;
+
+      if (propType !== 'ItemList') {
+        throw new Error('required_ItemList_type_to_insert:' + propertyName);
+      }
+
+      var currentList = this[propertyName];
 
       if (Array.isArray(currentList) === false) {
-        throw new Error('insert_only_to_arrays:' + propName);
+        throw new Error('required_array_to_insert:' + propertyName);
       }
 
       var existingIndex = findIndexByPrimaryKey(currentList, item[PRIMARY_KEY]);
 
       if (existingIndex >= 0) {
+        console.log('already_exist: ' + propertyName);
         return null;
       }
 
-      var itemInstance = this._createInstanceFromValue(propName, item);
+      // ('students', {id: 1, name: 'Jane'})
+      var itemInstance = this._createInstanceFromValue(propertyName, item);
 
+      // append new item to the store
       currentList.push(itemInstance);
 
       var scopeOfPropNames = {};
-      scopeOfPropNames[propName] = this._runPropEffects(propName);
+      scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
       return scopeOfPropNames;
     }
   }, {
     key: 'removeItem',
-    value: function removeItem(propName, primaryKey) {
-      var typeArray = this.__config[propName].type;
-      if (Array.isArray(typeArray) === false) {
-        throw new Error('remove_only_for_arrays');
+    value: function removeItem(propertyPath, primaryKeyValue) {
+      var levels = pathToLevels(propertyPath);
+
+      if (levels.length > 1) {
+        return this._iterateLevels(levels[0], levels.slice(1), primaryKeyValue, 'removeItem');
+        // return null;
       }
 
-      var currentList = this[propName];
+      var propertyName = propertyPath;
+
+      if (!this.__settings[propertyName]) {
+        throw new Error('no_such_property_to_remove: ' + propertyName);
+      }
+
+      var propType = this.__settings[propertyName].type;
+      // if (Array.isArray(typeArray) === false) {
+      if (propType !== 'ItemList') {
+        throw new Error('required_ItemList_to_remove: ' + propertyName);
+      }
+
+      var currentList = this[propertyName];
 
       if (Array.isArray(currentList) === false) {
-        throw new Error('remove_only_from_arrays:' + propName);
+        throw new Error('required_array_value_to_remove:' + propertyName);
       }
 
-      var existingIndex = findIndexByPrimaryKey(currentList, primaryKey);
+      var existingIndex = findIndexByPrimaryKey(currentList, primaryKeyValue);
 
       if (existingIndex < 0) {
+        console.log('record_not_found: ', primaryKeyValue, currentList);
         return null;
       }
 
+      // remove item from the store
       currentList.splice(existingIndex, 1);
 
       var scopeOfPropNames = {};
-      scopeOfPropNames[propName] = this._runPropEffects(propName);
+      scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
       return scopeOfPropNames;
     }
   }]);
@@ -812,7 +949,7 @@ var Computer = function () {
 
 module.exports = Computer;
 
-},{"./effect":3,"./setting":5}],3:[function(require,module,exports){
+},{"./effect":3}],3:[function(require,module,exports){
 /** @module */
 
 'use strict';
@@ -942,7 +1079,13 @@ var Listener = function () {
 module.exports = Listener;
 
 },{}],5:[function(require,module,exports){
-/** @module */
+/**
+ * Creates an internal object from readable settings
+ * - async type
+ * - computed function + watched keys
+ * @todo: precompile these objects from config
+ * @module
+ */
 
 'use strict';
 
@@ -960,8 +1103,9 @@ var areAllArgumentsFilled = function (args) {
 };
 
 /**
- * Async properteis contains only computedAsync definition
+ * Async properties contains only computedAsync definition
  * There is a default function to compute initial values for async properties (null values for data and error)
+ * @returns {Object} Default object for computed async
  */
 var defaultComputedForAsync = function () {
   if (areAllArgumentsFilled(arguments)) {
@@ -971,22 +1115,13 @@ var defaultComputedForAsync = function () {
   return null;
 };
 
-/** Async wrapper for initial types */
-var defaultTypeForAsync = function (initialType) {
-  return {
-    data: { type: initialType },
-    error: { type: String },
-    loading: { type: Boolean }
-    // null (not yet defined) or true
-    // isLoading: {
-    //   type: Boolean,
-    //   computed: ['data', 'error', function(data, error) {
-    //     //if (data === null && error === null) { return null; }
-    //     //return data === null && error === null;
-    //     return true;
-    //   }]
-    // }
-  };
+var buildSettings = function (config) {
+  var settings = {};
+  Object.keys(config).forEach(function (propName) {
+    settings[propName] = new Setting(propName, config[propName]); // eslint-disable-line
+  });
+
+  return settings;
 };
 
 /**
@@ -1010,9 +1145,50 @@ var Setting = function Setting(propName, propConfig) {
     throw new Error('use_computed_or_computedAsync: ' + propName);
   }
 
-  // add a wrap for async properties
-  // Number -> Async(Number)
-  this.type = computedAsync ? defaultTypeForAsync(propConfig.type) : propConfig.type;
+  if (!propConfig.type || typeof propConfig.type !== 'string') {
+    throw new Error('required_prop_type_string: ' + propName);
+  }
+
+  if (computedAsync) {
+    var defaultAsyncConfig = {
+      data: {
+        type: propConfig.type,
+        label: propConfig.label,
+        schema: propConfig.schema,
+        ref: propConfig.ref
+      },
+      error: {
+        type: 'Text',
+        label: 'Error'
+      },
+      // TODO: to computed
+      // if data is null and error is null, then loading?
+      loading: {
+        type: 'Boolean',
+        label: 'Loading'
+      }
+    };
+
+    this.type = 'Item';
+    this.label = 'AsyncItem';
+    this.refSettings = buildSettings(defaultAsyncConfig);
+    this.schema = 'AsyncItem';
+  } else {
+    this.type = propConfig.type;
+    // <label>My input</label> for according input or span
+    this.label = propConfig.label;
+
+    if (propConfig.ref) {
+      // TODO: combine ref + schema
+      // this.ref = propConfig.ref;
+      this.refSettings = buildSettings(propConfig.ref);
+    }
+
+    if (propConfig.schema) {
+      // http://schema.org
+      this.schema = propConfig.schema;
+    }
+  }
 
   // exit for simple writable properties
   // continue for computed props
