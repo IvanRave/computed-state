@@ -1,4 +1,4 @@
-computed-state
+Computed state
 ===
 
 [![Build Status](https://travis-ci.org/IvanRave/computed-state.svg?branch=master)](https://travis-ci.org/IvanRave/computed-state)
@@ -87,10 +87,10 @@ Usage:
 ```
 module.exports = {
   // simple writable property
-  endpoint: { type: String },
+  endpoint: { type: 'Text' },
   // async computed property
   weather: {
-    type: Number,
+    type: 'Number',
     computedAsync: ['endpoint', function(endpoint, resolve, reject) {
       if (endpoint === null) { return null; }
       // update externally
@@ -106,7 +106,7 @@ module.exports = {
   },
   // a computed property, based on 'weather' async property
   weatherMessage: {
-    type: String,
+    type: 'Text',
     computed: ['weather', function(weatherAsync) {
       if (weatherAsync === null || weatherAsync.data === null) {
          return null;

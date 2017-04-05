@@ -300,11 +300,6 @@ var ComputedState = function () {
       this.operate(this._rootEntity.removeItem(propertyPath, id));
     }
   }, {
-    key: 'pingState',
-    value: function pingState() {
-      this.ready([]);
-    }
-  }, {
     key: 'subscribe',
     value: function subscribe(callback, watchedKeys) {
       return subscribeAny(callback, watchedKeys, this._listeners);
@@ -1124,6 +1119,25 @@ var buildSettings = function (config) {
   return settings;
 };
 
+var attachProps = function (initialSetting, propConfig) {
+  var setting = initialSetting;
+  setting.type = propConfig.type;
+  // <label>My input</label> for according input or span
+
+  if (propConfig.label) {
+    setting.label = propConfig.label;
+  }
+
+  if (propConfig.schema) {
+    // http://schema.org
+    setting.schema = propConfig.schema;
+  }
+
+  if (propConfig.sameAsProperty) {
+    setting.sameAsProperty = propConfig.sameAsProperty;
+  }
+};
+
 /**
  * Convert from JSON configuration to Setting model
  * all async properties are computed
@@ -1135,8 +1149,14 @@ var Setting = function Setting(propName, propConfig) {
   _classCallCheck(this, Setting);
 
   if (!propConfig.type) {
-    throw new Error('required_type: ' + propName + ': ' + propConfig.type);
+    throw new Error('required_type: ' + propName);
   }
+
+  if (typeof propConfig.type !== 'string') {
+    throw new Error('required_prop_type_string: ' + propName);
+  }
+
+  // propConfig.label is optional
 
   var computed = propConfig.computed;
   var computedAsync = propConfig.computedAsync;
@@ -1145,18 +1165,18 @@ var Setting = function Setting(propName, propConfig) {
     throw new Error('use_computed_or_computedAsync: ' + propName);
   }
 
-  if (!propConfig.type || typeof propConfig.type !== 'string') {
-    throw new Error('required_prop_type_string: ' + propName);
-  }
-
   if (computedAsync) {
-    var defaultAsyncConfig = {
-      data: {
-        type: propConfig.type,
-        label: propConfig.label,
-        schema: propConfig.schema,
-        ref: propConfig.ref
-      },
+    var innerType = {};
+    attachProps(innerType, propConfig);
+
+    if (propConfig.ref) {
+      innerType.ref = propConfig.ref;
+    }
+
+    this.type = 'Item';
+    this.label = 'AsyncItem';
+    this.refSettings = buildSettings({
+      data: innerType,
       error: {
         type: 'Text',
         label: 'Error'
@@ -1167,26 +1187,15 @@ var Setting = function Setting(propName, propConfig) {
         type: 'Boolean',
         label: 'Loading'
       }
-    };
-
-    this.type = 'Item';
-    this.label = 'AsyncItem';
-    this.refSettings = buildSettings(defaultAsyncConfig);
+    });
     this.schema = 'AsyncItem';
   } else {
-    this.type = propConfig.type;
-    // <label>My input</label> for according input or span
-    this.label = propConfig.label;
+    attachProps(this, propConfig);
 
     if (propConfig.ref) {
       // TODO: combine ref + schema
       // this.ref = propConfig.ref;
       this.refSettings = buildSettings(propConfig.ref);
-    }
-
-    if (propConfig.schema) {
-      // http://schema.org
-      this.schema = propConfig.schema;
     }
   }
 

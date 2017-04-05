@@ -1,8 +1,9 @@
 {
   "name": "computed-state",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Observable computed state; calculated properties; NoSQL view model",
   "main": "index.js",
+  "author": "Ivan Reyvart",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
