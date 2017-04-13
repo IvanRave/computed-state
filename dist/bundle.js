@@ -128,13 +128,23 @@ var buildSettings = function (config) {
   return settings;
 };
 
+/**
+ * @param {Object} rootEntityConfig A template for root entity
+ * @param {String?} initialPrimaryKey A name of primary property,
+ *         like 'id' or 'identifier'. One name for all entities.
+ *         By default: 'id'
+ * @returns An instance of ComputedState
+ */
+
 var ComputedState = function () {
-  function ComputedState(rootConfig) {
+  function ComputedState(rootEntityConfig, initialPrimaryKey) {
     _classCallCheck(this, ComputedState);
 
-    var rootSettings = buildSettings(rootConfig);
+    var primaryKey = initialPrimaryKey || 'id';
 
-    this._rootEntity = new Computer(rootSettings);
+    var rootSettings = buildSettings(rootEntityConfig);
+
+    this._rootEntity = new Computer(rootSettings, primaryKey);
     this._listeners = [];
     this._asyncListeners = [];
 
@@ -296,8 +306,8 @@ var ComputedState = function () {
     }
   }, {
     key: 'removeItem',
-    value: function removeItem(propertyPath, id) {
-      this.operate(this._rootEntity.removeItem(propertyPath, id));
+    value: function removeItem(propertyPath, primaryKeyValue) {
+      this.operate(this._rootEntity.removeItem(propertyPath, primaryKeyValue));
     }
   }, {
     key: 'subscribe',
@@ -353,22 +363,20 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 
 var Effect = require('./effect');
 
-var PRIMARY_KEY = 'id';
-
-var findIndexByPrimaryKey = function (list, primaryKey) {
+var findIndexByKeyValue = function (list, propertyKey, propertyValue) {
   for (var i = 0, l = list.length; i < l; i += 1) {
-    if (list[i][PRIMARY_KEY] === primaryKey) {
+    if (list[i][propertyKey] === propertyValue) {
       return i;
     }
   }
   return -1;
 };
 
-var findItemByPrimaryKey = function (list, primaryKeyString) {
+var findItemByKeyValue = function (list, propertyKey, propertyValueString) {
   return list.filter(function (elem) {
     // country['id'] === 'usa'
     // 'members.5.name' -  typeof '5' === 'string'
-    return elem[PRIMARY_KEY] + '' === primaryKeyString;
+    return elem[propertyKey] + '' === propertyValueString;
   })[0];
 };
 
@@ -389,13 +397,24 @@ var levelsToPath = function (levels) {
 var Computer = function () {
   /**
    * @param {Object} settings Common settings for all instances
+   * @param {String?} primaryKey A name of primary property, like 'id'
    */
-  function Computer(settings) {
+  function Computer(settings, primaryKey) {
     _classCallCheck(this, Computer);
 
     if (!settings) {
-      throw new Error('settings_required');
+      throw new Error('required_settings');
     }
+    if (!primaryKey) {
+      throw new Error('required_primaryKey');
+    }
+
+    Object.defineProperty(this, '__primary', {
+      value: primaryKey,
+      writable: false,
+      enumerable: false,
+      configurable: false
+    });
 
     Object.defineProperty(this, '__effects', {
       value: [],
@@ -473,7 +492,7 @@ var Computer = function () {
     value: function _createByType(entityConfig, value) {
       // value = { name: 'bar', lname: 'foo', person: { age: 123 } }
       // 1. create 2. update props (with effects)
-      var needEntity = new this.constructor(entityConfig);
+      var needEntity = new this.constructor(entityConfig, this.__primary);
       needEntity.update(value);
       return needEntity;
     }
@@ -684,7 +703,7 @@ var Computer = function () {
         var elemPrimaryKey = nextLevels[0];
         // search by index of an array
         // it can be replaced with search by id of item
-        var mainItem = findItemByPrimaryKey(mainEntity, elemPrimaryKey);
+        var mainItem = findItemByKeyValue(mainEntity, this.__primary, elemPrimaryKey);
 
         if (!mainItem) {
           // console.log('mainItem', elemPrimaryKey, JSON.stringify(mainObject));
@@ -829,56 +848,37 @@ var Computer = function () {
 
       return this._runBatchedEffects(changedPropNames);
     }
-
-    /**
-     * Insert to an array
-     * - insertItem('tasks',  {id: 2, name: 'asdf'})
-     * @param {String} propertyPath Like 'groups', 'students',
-     *                 'groups.5.members', 'student.grades'
-     * @param {Object} item Entity data: { id: 1, name: 'asdf' }
-     * @returns {undefined}
-     */
-
   }, {
-    key: 'insertItem',
-    value: function insertItem(propertyPath, item) {
-      // TODO: verify id unique through all table
-      // TODO: insert, using sorting by id
-      if (item[PRIMARY_KEY] === null || item[PRIMARY_KEY] === undefined) {
-        throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propertyPath);
-      }
+    key: '_insertItemByPropertyName',
+    value: function _insertItemByPropertyName(propertyName, item) {
+      var propertySetting = this.__settings[propertyName];
 
-      // duplication of _updatePath
-      var levels = pathToLevels(propertyPath);
-      var mainLevel = levels[0];
-      if (!mainLevel) {
-        throw new Error('property_path_invalid: ' + propertyPath);
-      }
-
-      if (levels.length > 1) {
-        return this._iterateLevels(mainLevel, levels.slice(1), item, 'insertItem');
-        // return null;
-      }
-
-      var propertyName = propertyPath; // 1-level
-
-      if (!this.__settings[propertyName]) {
+      if (!propertySetting) {
         throw new Error('no_such_property_to_insert: ' + propertyName);
       }
 
-      var propType = this.__settings[propertyName].type;
+      var propertyType = propertySetting.type;
 
-      if (propType !== 'ItemList') {
+      if (propertyType !== 'ItemList') {
         throw new Error('required_ItemList_type_to_insert:' + propertyName);
       }
 
+      // [{ id: 123, name: 'John' }, { id: 234, name: Jane }]
       var currentList = this[propertyName];
 
       if (Array.isArray(currentList) === false) {
         throw new Error('required_array_to_insert:' + propertyName);
       }
 
-      var existingIndex = findIndexByPrimaryKey(currentList, item[PRIMARY_KEY]);
+      var primaryPropertyKey = this.__primary;
+
+      // TODO: verify id unique through all table
+      // TODO: insert, using sorting by id
+      if (item[primaryPropertyKey] === null || item[primaryPropertyKey] === undefined) {
+        throw new Error('required_primary_key_for_prop: ' + primaryPropertyKey + ': ' + propertyName);
+      }
+
+      var existingIndex = findIndexByKeyValue(currentList, primaryPropertyKey, item[primaryPropertyKey]);
 
       if (existingIndex >= 0) {
         console.log('already_exist: ' + propertyName);
@@ -894,6 +894,32 @@ var Computer = function () {
       var scopeOfPropNames = {};
       scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
       return scopeOfPropNames;
+    }
+
+    /**
+     * Insert to an array
+     * - insertItem('tasks',  {id: 2, name: 'asdf'})
+     * @param {String} propertyPath Like 'groups', 'students',
+     *                 'groups.5.members', 'student.grades'
+     * @param {Object} item Entity data: { id: 1, name: 'asdf' }
+     * @returns {undefined}
+     */
+
+  }, {
+    key: 'insertItem',
+    value: function insertItem(propertyPath, item) {
+      // duplication of _updatePath
+      var levels = pathToLevels(propertyPath);
+      var mainLevel = levels[0];
+      if (!mainLevel) {
+        throw new Error('property_path_invalid: ' + propertyPath);
+      }
+
+      if (levels.length > 1) {
+        return this._iterateLevels(mainLevel, levels.slice(1), item, 'insertItem');
+      }
+
+      return this._insertItemByPropertyName(propertyPath, item);
     }
   }, {
     key: 'removeItem',
@@ -923,7 +949,7 @@ var Computer = function () {
         throw new Error('required_array_value_to_remove:' + propertyName);
       }
 
-      var existingIndex = findIndexByPrimaryKey(currentList, primaryKeyValue);
+      var existingIndex = findIndexByKeyValue(currentList, this.__primary, primaryKeyValue);
 
       if (existingIndex < 0) {
         console.log('record_not_found: ', primaryKeyValue, currentList);

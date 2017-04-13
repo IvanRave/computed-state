@@ -3,30 +3,30 @@ var State = require('../src/computed-state');
 var complex = require('./complex');
 
 var personJane = {
-  id: 'Jane',
+  identifier: 'Jane',
   name: 'Jane'
 };
 
 var personJohn = {
-  id: 'John',
+  identifier: 'John',
   name: 'John'
 };
 
 var someGroup = {
-  id: '5A',
+  identifier: '5A',
   name: 'BestGroup',
   members: [{
-    id: 30,
+    identifier: 30,
     level: 30,
     person: personJane
   }, {
-    id: 70,
+    identifier: 70,
     level: 70,
     person: personJohn
   }],
   // data duplicate (foreign_key in rdbms)
   captain: {
-    id: 70,
+    identifier: 70,
     level: 70,
     person: personJohn
   }
@@ -35,7 +35,7 @@ var someGroup = {
 describe('store', function() {
   var store;
   beforeEach(function() {
-    store = new State(complex);
+    store = new State(complex, 'identifier');
     store.update({
       groups: [someGroup],
       persons: [personJane, personJohn]
@@ -67,14 +67,14 @@ describe('store', function() {
     });
 
     store.insertItem('groups', {
-      id: '5B',
+      identifier: '5B',
       name: 'MiddleGroup'
     });
   });
 
   it('should remove group', function(done) {
     store.insertItem('groups', {
-      id: '5B',
+      identifier: '5B',
       name: 'MiddleGroup'
     });
 
@@ -95,11 +95,11 @@ describe('store', function() {
 
       expect(state.groups.length).to.equal(1);
       expect(state.groups[0].members.length).to.equal(3);
-      expect(state.groups[0].members[2].id).to.equal(12345);
+      expect(state.groups[0].members[2].identifier).to.equal(12345);
       expect(state.groups[0].members[2].cid).to.equal('c12345');
       // person is required
       expect(state.groups[0].members[2].person).to.deep.equal({
-        id: 'Jill',
+        identifier: 'Jill',
         name: 'Jill',
         cname: 'cJill',
         birthDate: null
@@ -108,10 +108,10 @@ describe('store', function() {
     });
 
     store.insertItem('groups.5A.members', {
-      id: 12345,
+      identifier: 12345,
       created: '2010-01-01',
       person: {
-        id: 'Jill',
+        identifier: 'Jill',
         name: 'Jill'
       }
     });
@@ -123,10 +123,10 @@ describe('store', function() {
 
       expect(state.groups.length).to.equal(1);
       expect(state.groups[0].members.length).to.equal(1);
-      expect(state.groups[0].members[0].id).to.equal(70);
+      expect(state.groups[0].members[0].identifier).to.equal(70);
       expect(state.groups[0].members[0].cid).to.equal('c70');
       expect(state.groups[0].members[0].person).to.deep.equal({
-        id: 'John',
+        identifier: 'John',
         birthDate: null,
         cname: 'cJohn',
         name: 'John'

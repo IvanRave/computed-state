@@ -1,6 +1,6 @@
 {
   "name": "computed-state",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Observable computed state; calculated properties; NoSQL view model",
   "main": "index.js",
   "author": "Ivan Reyvart",
@@ -13,7 +13,8 @@
     "test": "mocha",
     "build": "browserify window-global.js -o dist/bundle.js -t [ babelify ]",
     "serve": "http-server -p 8082",
-    "lint": "eslint src/*"
+    "lint": "eslint src/*",
+    "lint-test": "eslint test/*"
   },
   "devDependencies": {
     "babel-plugin-transform-es2015-block-scoping": "6.x",

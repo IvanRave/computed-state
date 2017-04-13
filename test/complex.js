@@ -1,5 +1,5 @@
 var person = {
-  id: { type: 'Text' },
+  identifier: { type: 'Text' },
   name: { type: 'Text' },
   cname: {
     type: 'Text',
@@ -17,13 +17,13 @@ var person = {
 // or http://app_domain/members/5 - independent entity
 var member = {
   // subscription_id: http://app_domain/members/345
-  id: { type: 'Integer' },
+  identifier: { type: 'Integer' },
 
   cid: {
     type: 'Text',
-    computed: ['id', function (id) {
-      if (id === null) { return null; }
-      return 'c' + id;
+    computed: ['identifier', function (identifier) {
+      if (identifier === null) { return null; }
+      return 'c' + identifier;
     }]
   },
   // when this subscription is created
@@ -40,7 +40,7 @@ var member = {
 };
 
 var group = {
-  id: { type: 'Text' },
+  identifier: { type: 'Text' },
 
   name: { type: 'Text' },
 

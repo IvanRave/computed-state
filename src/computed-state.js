@@ -109,7 +109,7 @@ const subscribeAny = function(callback, watchedKeys, anyListeners) {
  * @returns {Object} Scope of instances of settings
  */
 const buildSettings = function(config) {
-  var settings = {};
+  const settings = {};
   Object.keys(config).forEach(function(propName) {
     settings[propName] = new Setting(propName, config[propName]);
   });
@@ -117,11 +117,20 @@ const buildSettings = function(config) {
   return settings;
 };
 
+/**
+ * @param {Object} rootEntityConfig A template for root entity
+ * @param {String?} initialPrimaryKey A name of primary property,
+ *         like 'id' or 'identifier'. One name for all entities.
+ *         By default: 'id'
+ * @returns An instance of ComputedState
+ */
 class ComputedState {
-  constructor(rootConfig) {
-    const rootSettings = buildSettings(rootConfig);
+  constructor(rootEntityConfig, initialPrimaryKey) {
+    const primaryKey = initialPrimaryKey || 'id';
 
-    this._rootEntity = new Computer(rootSettings);
+    const rootSettings = buildSettings(rootEntityConfig);
+
+    this._rootEntity = new Computer(rootSettings, primaryKey);
     this._listeners = [];
     this._asyncListeners = [];
 
@@ -262,8 +271,8 @@ class ComputedState {
     this.operate(this._rootEntity.insertItem(propertyPath, item));
   }
 
-  removeItem(propertyPath, id) {
-    this.operate(this._rootEntity.removeItem(propertyPath, id));
+  removeItem(propertyPath, primaryKeyValue) {
+    this.operate(this._rootEntity.removeItem(propertyPath, primaryKeyValue));
   }
 
   subscribe(callback, watchedKeys) {

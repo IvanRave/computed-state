@@ -4,22 +4,20 @@
 
 const Effect = require('./effect');
 
-const PRIMARY_KEY = 'id';
-
-const findIndexByPrimaryKey = function(list, primaryKey) {
+const findIndexByKeyValue = function(list, propertyKey, propertyValue) {
   for (let i = 0, l = list.length; i < l; i += 1) {
-    if (list[i][PRIMARY_KEY] === primaryKey) {
+    if (list[i][propertyKey] === propertyValue) {
       return i;
     }
   }
   return -1;
 };
 
-const findItemByPrimaryKey = function(list, primaryKeyString) {
+const findItemByKeyValue = function(list, propertyKey, propertyValueString) {
   return list.filter(function(elem) {
     // country['id'] === 'usa'
     // 'members.5.name' -  typeof '5' === 'string'
-    return (elem[PRIMARY_KEY] + '') === primaryKeyString;
+    return (elem[propertyKey] + '') === propertyValueString;
   })[0];
 };
 
@@ -39,9 +37,18 @@ const levelsToPath = function(levels) {
 class Computer {
   /**
    * @param {Object} settings Common settings for all instances
+   * @param {String?} primaryKey A name of primary property, like 'id'
    */
-  constructor(settings) {
-    if (!settings) { throw new Error('settings_required'); }
+  constructor(settings, primaryKey) {
+    if (!settings) { throw new Error('required_settings'); }
+    if (!primaryKey) { throw new Error('required_primaryKey'); }
+
+    Object.defineProperty(this, '__primary', {
+      value: primaryKey,
+      writable: false,
+      enumerable: false,
+      configurable: false
+    });
 
     Object.defineProperty(this, '__effects', {
       value: [],
@@ -114,7 +121,7 @@ class Computer {
   _createByType(entityConfig, value) {
     // value = { name: 'bar', lname: 'foo', person: { age: 123 } }
     // 1. create 2. update props (with effects)
-    const needEntity = new this.constructor(entityConfig);
+    const needEntity = new this.constructor(entityConfig, this.__primary);
     needEntity.update(value);
     return needEntity;
   }
@@ -303,7 +310,7 @@ class Computer {
       const elemPrimaryKey = nextLevels[0];
       // search by index of an array
       // it can be replaced with search by id of item
-      const mainItem = findItemByPrimaryKey(mainEntity, elemPrimaryKey);
+      const mainItem = findItemByKeyValue(mainEntity, this.__primary, elemPrimaryKey);
 
       if (!mainItem) {
         // console.log('mainItem', elemPrimaryKey, JSON.stringify(mainObject));
@@ -437,6 +444,52 @@ class Computer {
     return this._runBatchedEffects(changedPropNames);
   }
 
+  _insertItemByPropertyName(propertyName, item) {
+    const propertySetting = this.__settings[propertyName];
+
+    if (!propertySetting) {
+      throw new Error('no_such_property_to_insert: ' + propertyName);
+    }
+
+    const propertyType = propertySetting.type;
+
+    if (propertyType !== 'ItemList') {
+      throw new Error('required_ItemList_type_to_insert:' + propertyName);
+    }
+
+    // [{ id: 123, name: 'John' }, { id: 234, name: Jane }]
+    const currentList = this[propertyName];
+
+    if (Array.isArray(currentList) === false) {
+      throw new Error('required_array_to_insert:' + propertyName);
+    }
+
+    const primaryPropertyKey = this.__primary;
+
+    // TODO: verify id unique through all table
+    // TODO: insert, using sorting by id
+    if (item[primaryPropertyKey] === null || item[primaryPropertyKey] === undefined) {
+      throw new Error('required_primary_key_for_prop: ' + primaryPropertyKey + ': ' + propertyName);
+    }
+
+    const existingIndex = findIndexByKeyValue(currentList, primaryPropertyKey, item[primaryPropertyKey]);
+
+    if (existingIndex >= 0) {
+      console.log('already_exist: ' + propertyName);
+      return null;
+    }
+
+    // ('students', {id: 1, name: 'Jane'})
+    const itemInstance = this._createInstanceFromValue(propertyName, item);
+
+    // append new item to the store
+    currentList.push(itemInstance);
+
+    const scopeOfPropNames = {};
+    scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
+    return scopeOfPropNames;
+  }
+
   /**
    * Insert to an array
    * - insertItem('tasks',  {id: 2, name: 'asdf'})
@@ -446,12 +499,6 @@ class Computer {
    * @returns {undefined}
    */
   insertItem(propertyPath, item) {
-    // TODO: verify id unique through all table
-    // TODO: insert, using sorting by id
-    if (item[PRIMARY_KEY] === null || item[PRIMARY_KEY] === undefined) {
-      throw new Error('required_primary_key_for_prop: ' + PRIMARY_KEY + ': ' + propertyPath);
-    }
-
     // duplication of _updatePath
     const levels = pathToLevels(propertyPath);
     const mainLevel = levels[0];
@@ -461,43 +508,9 @@ class Computer {
 
     if (levels.length > 1) {
       return this._iterateLevels(mainLevel, levels.slice(1), item, 'insertItem');
-      // return null;
     }
 
-    const propertyName = propertyPath; // 1-level
-
-    if (!this.__settings[propertyName]) {
-      throw new Error('no_such_property_to_insert: ' + propertyName);
-    }
-
-    const propType = this.__settings[propertyName].type;
-
-    if (propType !== 'ItemList') {
-      throw new Error('required_ItemList_type_to_insert:' + propertyName);
-    }
-
-    var currentList = this[propertyName];
-
-    if (Array.isArray(currentList) === false) {
-      throw new Error('required_array_to_insert:' + propertyName);
-    }
-
-    var existingIndex = findIndexByPrimaryKey(currentList, item[PRIMARY_KEY]);
-
-    if (existingIndex >= 0) {
-      console.log('already_exist: ' + propertyName);
-      return null;
-    }
-
-    // ('students', {id: 1, name: 'Jane'})
-    var itemInstance = this._createInstanceFromValue(propertyName, item);
-
-    // append new item to the store
-    currentList.push(itemInstance);
-
-    var scopeOfPropNames = {};
-    scopeOfPropNames[propertyName] = this._runPropEffects(propertyName);
-    return scopeOfPropNames;
+    return this._insertItemByPropertyName(propertyPath, item);
   }
 
   removeItem(propertyPath, primaryKeyValue) {
@@ -526,7 +539,7 @@ class Computer {
       throw new Error('required_array_value_to_remove:' + propertyName);
     }
 
-    var existingIndex = findIndexByPrimaryKey(currentList, primaryKeyValue);
+    var existingIndex = findIndexByKeyValue(currentList, this.__primary, primaryKeyValue);
 
     if (existingIndex < 0) {
       console.log('record_not_found: ', primaryKeyValue, currentList);
