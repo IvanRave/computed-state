@@ -58,6 +58,10 @@ const attachProps = function(initialSetting, propConfig) {
   if (propConfig.sameAsProperty) {
     setting.sameAsProperty = propConfig.sameAsProperty;
   }
+
+  if (propConfig.isHashMap === true) {
+    setting.isHashMap = true;
+  }
 };
 
 /**
