@@ -221,7 +221,7 @@ class Computer {
    */
   _shouldPropChange(propertyName, value) {
     if (value === undefined) {
-      throw new Error('value_cannot_be_undefined');
+      throw new Error('value_cannot_be_undefined: ' + propertyName);
     }
 
     const old = this[propertyName];
