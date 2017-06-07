@@ -24,16 +24,16 @@ describe('weather', function() {
       // after: update({ endpoint: 'fresh' })
       if (subNumber === 1) {
         expect(changedKeys).to.deep.equal([
-          'endpoint', 'weather'
+          'cityId', 'date', 'temperature'
         ]);
 
-        expect(state.weather).to.deep.equal({
+        expect(state.temperature).to.deep.equal({
           data: null,
           error: null,
           loading: true
         });
 
-        expect(state.weatherMessage).to.null;
+        expect(state.temperatureMessage).to.null;
 
         subNumber += 1;
         return;
@@ -42,16 +42,16 @@ describe('weather', function() {
       // after: update({ 'weather.data': 32 })
       if (subNumber === 2) {
         expect(changedKeys).to.deep.equal([
-          'weather', 'weatherMessage'
+          'temperature', 'temperatureMessage'
         ]);
 
-        expect(state.weather).to.deep.equal({
-          data: 32,
+        expect(state.temperature).to.deep.equal({
+          data: 42,
           error: null,
           loading: false
         });
 
-        expect(state.weatherMessage).to.equal('The weather is 32');
+        expect(state.temperatureMessage).to.equal('The weather is 42');
         return;
       }
 
@@ -59,13 +59,14 @@ describe('weather', function() {
     });
 
     store.subscribeAsync(function(changedAsyncKeys, state) {
-      expect(changedAsyncKeys).to.deep.equal(['weather']);
-      expect(state.weather).to.deep.equal({
-        data: 32, error: null, loading: false
+      expect(changedAsyncKeys).to.deep.equal(['temperature']);
+      expect(state.temperature).to.deep.equal({
+        data: 42, error: null, loading: false
       });
       done();
     });
 
-    store.update({ endpoint: 'https://news.yandex.ru/index.rss' });
+    store.update({ cityId: 'MSK', date: '2017-01-01' });
+    // endpoint: 'https://news.yandex.ru/index.rss'
   });
 });

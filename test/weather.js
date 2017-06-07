@@ -1,23 +1,39 @@
+/**
+ * A city - it is an entity (limited entity with few parameters)
+ * A weather/temperature - it is just a parameter (not an entity)
+ *
+ * City
+ * - id
+ * - name
+ *
+ * CityWeatherState
+ * - id = city_id + date
+ * - city_id
+ * - date
+ * - temperature
+ * - pressure
+ */
+
 module.exports = {
-  endpoint: { type: 'Text' },
-  weather: {
+  cityId: { type: 'Text' },
+  date: { type: 'Date' },
+  temperature: {
     type: 'Integer',
-    computedAsync: ['endpoint', function(endpoint, resolve) { // reject
-      if (endpoint === null) { return null; }
+    computedAsync: ['cityId', 'date', function(cityId, date, resolve) { // reject
+      if (cityId === null || date === null) { return null; }
       console.log('run async weather');
       // update externally
       var timeoutInstance = setTimeout(function() {
-        // console.log('resolve 35');
-        resolve(endpoint.length);
+        resolve(42);
         // reject('error message or code');
       }, 500);
 
       return clearTimeout.bind(null, timeoutInstance);
     }]
   },
-  weatherMessage: {
+  temperatureMessage: {
     type: 'Text',
-    computed: ['weather', function(prom) {
+    computed: ['temperature', function(prom) {
       if (prom === null || prom.data === null) { return null; }
       return 'The weather is ' + prom.data;
     }]
