@@ -606,7 +606,7 @@ var Computer = function () {
     key: '_shouldPropChange',
     value: function _shouldPropChange(propertyName, value) {
       if (value === undefined) {
-        throw new Error('value_cannot_be_undefined');
+        throw new Error('value_cannot_be_undefined: ' + propertyName);
       }
 
       var old = this[propertyName];
@@ -1161,6 +1161,10 @@ var attachProps = function (initialSetting, propConfig) {
 
   if (propConfig.sameAsProperty) {
     setting.sameAsProperty = propConfig.sameAsProperty;
+  }
+
+  if (propConfig.isHashMap === true) {
+    setting.isHashMap = true;
   }
 };
 
