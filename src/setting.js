@@ -44,11 +44,6 @@ const buildSettings = function(config) {
 const attachProps = function(initialSetting, propConfig) {
   const setting = initialSetting;
   setting.type = propConfig.type;
-  // <label>My input</label> for according input or span
-
-  if (propConfig.label) {
-    setting.label = propConfig.label;
-  }
 
   if (propConfig.schema) {
     // http://schema.org
@@ -80,8 +75,6 @@ class Setting {
       throw new Error('required_prop_type_string: ' + propName);
     }
 
-    // propConfig.label is optional
-
     const computed = propConfig.computed;
     const computedAsync = propConfig.computedAsync;
 
@@ -98,18 +91,16 @@ class Setting {
       }
 
       this.type = 'Item';
-      this.label = 'AsyncItem';
+
       this.refSettings = buildSettings({
         data: innerType,
         error: {
-          type: 'Text',
-          label: 'Error'
+          type: 'Text'
         },
         // TODO: to computed
         // if data is null and error is null, then loading?
         loading: {
-          type: 'Boolean',
-          label: 'Loading'
+          type: 'Boolean'
         }
       });
       this.schema = 'AsyncItem';
