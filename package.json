@@ -1,6 +1,6 @@
 {
   "name": "computed-state",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "description": "Observable computed state; calculated properties; NoSQL view model",
   "main": "index.js",
   "author": "Ivan Reyvart",
@@ -17,13 +17,13 @@
     "lint-test": "eslint test/*"
   },
   "devDependencies": {
-    "babel-plugin-transform-es2015-block-scoping": "^6.24.1",
+    "babel-plugin-transform-es2015-block-scoping": "^6.26.0",
     "babel-plugin-transform-es2015-classes": "^6.24.1",
     "babelify": "^7.3.0",
     "browserify": "^14.4.0",
-    "chai": "^4.1.0",
-    "eslint": "^4.3.0",
-    "eslint-config-airbnb-base": "^11.3.1",
+    "chai": "^4.1.2",
+    "eslint": "^4.6.1",
+    "eslint-config-airbnb-base": "^11.3.2",
     "eslint-plugin-import": "^2.7.0",
     "mocha": "^3.5.0",
     "moment": "^2.18.1"
